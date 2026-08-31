@@ -18,7 +18,7 @@ const {
 } = require('./clientHealth');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
 const { createTokscaleCapabilityResolver, filterSupportedClients, parseSupportedClients } = require('./tokscaleCapabilities');
-const { customPricingPath, tokscaleCacheDirs, tokscaleConfigDir } = require('./tokscaleConfig');
+const { customPricingPath, tokscaleCacheDirs } = require('./tokscaleConfig');
 const {
   applyPeriodDelta,
   emptyPeriod,
@@ -2220,9 +2220,13 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const xdgHome = xdgDataHome(home);
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
-  const tokscaleConfigRoot = tokscaleConfigDir({ env, platform, homeDir: home });
-  add('cursor', ['tokscale-cursor-cache', path.join(tokscaleConfigRoot, 'cursor-cache')]);
-  add('antigravity', ['tokscale-antigravity-cache', path.join(tokscaleConfigRoot, 'antigravity-cache')]);
+  // Cursor and Antigravity caches are home-relative literals in tokscale
+  // (`cursor.rs` `cursor_cache_dir`, same shape in `antigravity.rs`), not
+  // `get_config_dir()`. On Windows that is `%USERPROFILE%\.config\tokscale\…`
+  // rather than `%APPDATA%\tokscale\…`; TOKSCALE_CONFIG_DIR is also ignored
+  // here because those modules never read it.
+  add('cursor', ['tokscale-cursor-cache', path.join(home, '.config', 'tokscale', 'cursor-cache')]);
+  add('antigravity', ['tokscale-antigravity-cache', path.join(home, '.config', 'tokscale', 'antigravity-cache')]);
   // A whitespace-only KIMI_CODE_HOME counts as unset, matching tokscale: it
   // joins `sessions` onto the raw value, so a blank export would resolve to the
   // root-level /sessions and hide the real one.
