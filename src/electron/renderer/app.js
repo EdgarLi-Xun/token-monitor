@@ -88,6 +88,7 @@ const LIMIT_PROVIDERS = [
   { id: 'kimi', label: 'Kimi' },
   { id: 'grok', label: 'Grok' },
   { id: 'copilot', label: 'GitHub Copilot' },
+  { id: 'zed', label: 'Zed' },
   { id: 'commandcode', label: 'Command Code' },
   { id: 'mimo', label: 'MiMo' },
   { id: 'zai', label: 'GLM' },
@@ -108,7 +109,9 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   codex: 'codexAccountGroup',
   opencode: 'opencodeCookieGroup',
   cursor: 'cursorAccountGroup',
+  antigravity: 'antigravityAccountGroup',
   kimi: 'kimiAccountGroup',
+  zed: 'zedAccountGroup',
   copilot: 'copilotAccountGroup',
   mimo: 'mimoAccountGroup',
   zai: 'zaiAccountGroup',
@@ -128,7 +131,9 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   codex: 'codexAccountStatus',
   opencode: 'opencodeCookieStatus',
   cursor: 'cursorAccountStatus',
+  antigravity: 'antigravityAccountStatus',
   kimi: 'kimiAccountStatus',
+  zed: 'zedAccountStatus',
   copilot: 'copilotApiTokenStatus',
   mimo: 'mimoAccountStatus',
   zai: 'zaiAccountStatus',
@@ -316,7 +321,9 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false };
+state.zedAccountExpanded = false;
+state.zedPendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
 state.codexResetForecast = null;
 state.codexResetForecastBusy = false;
@@ -362,7 +369,7 @@ let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
@@ -2399,7 +2406,7 @@ function limitProviderMeta(provider, provenance = null) {
 function limitProviderPlan(provider) {
   if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
   const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
-  if (label) return limitProviderPresentationApi.limitProviderDisplayLabel(label);
+  if (label) return limitProviderPresentationApi.limitProviderPlanDisplayLabel(provider, label);
   return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
 }
 
@@ -3934,6 +3941,22 @@ function formatCursorSpendValue(window) {
     : usedText;
 }
 
+// Zed's billing rows follow the Command Code shape: the headline and bar carry
+// the percentage, and the absolute figure sits under the bar — money for Token
+// Spend, a raw count for metered Edit Predictions. Both follow showLimitUsed,
+// so the number under the bar can never contradict the bar's own direction.
+// Unlimited Edit Predictions have no numbers at all; formatLimitWindowValue
+// already turns their `detail` into the translated headline.
+function formatZedBillingDetail(window) {
+  const used = optionalFiniteNumber(window?.used);
+  const limit = optionalFiniteNumber(window?.limit);
+  if (used === null || limit === null || limit <= 0) return '';
+  const showUsed = Boolean(state.settings?.showLimitUsed);
+  if (window?.limitId === 'zed.edit-predictions') return formatLimitCount(window, showUsed);
+  const currency = window?.currency || 'USD';
+  return `${formatMoney(showUsed ? used : Math.max(0, limit - used), currency)} / ${formatMoney(limit, currency)}`;
+}
+
 function formatBalanceAmount(value, source) {
   return formatMoney(value, source?.currency);
 }
@@ -4333,17 +4356,19 @@ function thirdPartyQuotaWindow(provider) {
 function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
   if (hasPercent) return `${formatPercent(fillPercent)} ${limitModeSuffix(showUsed)}`;
   if (!window) return '--';
-  const remaining = Number(window?.remaining);
-  if (Number.isFinite(remaining)) {
+  if (String(window.detail || '').toLowerCase() === 'unlimited') return t('settings.thirdparty.unlimited');
+  const remaining = optionalFiniteNumber(window?.remaining);
+  if (remaining !== null) {
     return window?.showMeter === false ? formatLimitAmount(remaining) : `${formatLimitAmount(remaining)} left`;
   }
-  const limit = Number(window?.limit);
-  if (Number.isFinite(limit)) return `${formatLimitAmount(limit)} cap`;
-  return '';
+  const limit = optionalFiniteNumber(window?.limit);
+  if (limit !== null) return `${formatLimitAmount(limit)} cap`;
+  return window.detail || '';
 }
 
 function formatHomeLimitWindowValue(window, showUsed) {
   if (window?.planStatus === 'expired') return t('limits.mimo.planExpired');
+  if (String(window?.detail || '').toLowerCase() === 'unlimited') return t('settings.thirdparty.unlimited');
   if (isCreditsWindow(window)) {
     if (window.remaining == null) {
       return String(window.detail || '').toLowerCase() === 'unlimited'
@@ -4772,7 +4797,9 @@ function renderProviderWindows(provider, color) {
     const session = codexCanonicalWindow(provider, 'session');
     const weekly = codexCanonicalWindow(provider, 'weekly');
     const monthly = codexCanonicalWindow(provider, 'billing');
-    const additionalWindows = (provider.windows || []).filter((window) => window?.additional === true);
+    const additionalWindows = state.settings?.showCodexAdditionalLimits === false
+      ? []
+      : (provider.windows || []).filter((window) => window?.additional === true);
     if (session) {
       const sessionNode = limitWindowNode(session.label || 'Session', session, color, 0.95);
       if (!weekly && !monthly) sessionNode.classList.add('limit-window-wide');
@@ -5027,6 +5054,23 @@ function renderProviderWindows(provider, color) {
     for (const billing of billingWindows) {
       const node = limitWindowNode(billing?.label || 'Monthly', billing, color, 0.68);
       node.classList.add('limit-window-wide');
+      windows.append(node);
+    }
+  } else if (provider.provider === 'zed') {
+    windows.classList.add('limit-windows-zed');
+    for (const billing of windowsForKind(provider, 'billing')) {
+      const unlimitedEditPredictions = billing?.limitId === 'zed.edit-predictions'
+        && String(billing?.detail || '').trim().toLowerCase() === 'unlimited';
+      const node = limitWindowNode(
+        billing?.label || 'Token Spend',
+        billing,
+        color,
+        0.95,
+        null,
+        formatZedBillingDetail(billing)
+      );
+      node.classList.add('limit-window-wide');
+      if (unlimitedEditPredictions) node.classList.add('limit-window-no-reset');
       windows.append(node);
     }
   } else if (provider.provider === 'zai' || provider.provider === 'zaiteam') {
@@ -5634,6 +5678,12 @@ function renderCursorAccountGroup(label, providers, color) {
   return row;
 }
 
+function renderAntigravityAccountGroup(label, providers, color) {
+  return renderNamedApiAccountGroup('antigravity', label, providers, color, {
+    groupPlanText: t('settings.antigravity.nAccounts', { count: providers.length })
+  });
+}
+
 function opencodeAccountTitle(provider, index) {
   const name = String(provider?.accountName || '').trim();
   // The collector's canonical name is shown as-is. This column holds account
@@ -5832,6 +5882,7 @@ function renderLimits() {
       state.settings?.showToolIcons !== false,
       state.settings?.claudePrepaidBalanceEnabled !== false,
       state.settings?.codexResetForecastEnabled === true,
+      state.settings?.showCodexAdditionalLimits !== false,
       state.settings?.currency || '',
       state.settings?.currencyRatesEffective || null,
       state.settings?.subscriptions || [],
@@ -5888,6 +5939,10 @@ function renderLimits() {
     }
     if (id === 'cursor' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
       nodes.push(renderCursorAccountGroup(label, visibleProviders, color));
+      continue;
+    }
+    if (id === 'antigravity' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderAntigravityAccountGroup(label, visibleProviders, color));
       continue;
     }
     if (id === 'volcengine' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
@@ -8402,6 +8457,11 @@ function syncWindowBehaviorControls() {
   });
   els.pinButton.title = title;
   els.pinButton.setAttribute('aria-label', title);
+  // Windows-only, and only meaningful while the widget is pinned above apps:
+  // the other modes never sit over the taskbar in the first place.
+  const taskbarOptionApplies = state.appInfo?.platform === 'win32' && mode === 'floating';
+  els.keepAboveTaskbarRow?.classList.toggle('hidden', !taskbarOptionApplies);
+  if (els.keepAboveTaskbarInput) els.keepAboveTaskbarInput.checked = state.settings?.keepAboveTaskbar === true;
 }
 
 function syncWindowShortcutStatus() {
@@ -8516,6 +8576,15 @@ function normalizeWindowToggleShortcutValue(value) {
 const BUBBLE_CONTENT_MIN_W = 34;
 const BUBBLE_CONTENT_HEIGHT = 34;
 const BUBBLE_CONTENT_PAD_X = 10;
+const BUBBLE_GENERATED_IMAGE_CSS_HEIGHT = 24;
+let floatingBubbleRenderedBitmapHeight = null;
+
+function currentFloatingBubbleBitmapHeight() {
+  return window.TokenMonitorTrayComposer.floatingBubbleBitmapHeight(
+    window.devicePixelRatio,
+    BUBBLE_GENERATED_IMAGE_CSS_HEIGHT
+  );
+}
 
 function floatingBubbleGeneratedColors() {
   const text = resolvedThemeColor('text');
@@ -8533,8 +8602,12 @@ function renderFloatingBubbleContent() {
   if (!el || !state.floatingBubble.collapsed) return;
   const mode = state.settings?.floatingBubbleContent || 'icon';
   if (window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) {
+    // The generated content is a raster image displayed at 24 CSS px. Match its
+    // backing height to the current display scale so Chromium never has to
+    // interpolate already-rasterized text on fractional or high-DPI displays.
+    const bitmapHeight = currentFloatingBubbleBitmapHeight();
     const dataUrl = state.stats
-      ? trayDataUrlForMode(mode, 44, floatingBubbleGeneratedColors(), {
+      ? trayDataUrlForMode(mode, bitmapHeight, floatingBubbleGeneratedColors(), {
           contentOnly: mode === 'barsAllSessions' || mode === 'limitsAllSessions',
           providerContrastHalo: true,
           showProviderBadge: false,
@@ -8549,14 +8622,18 @@ function renderFloatingBubbleContent() {
       img.addEventListener('load', reportFloatingBubbleSize, { once: true });
       img.src = dataUrl;
       el.replaceChildren(img);
+      floatingBubbleRenderedBitmapHeight = bitmapHeight;
       return;
     }
+    floatingBubbleRenderedBitmapHeight = null;
     el.classList.remove('bars');
     el.textContent = (state.stats && window.TokenMonitorTrayText.formatTrayText(state.stats, mode, currentCurrency(), compactTokenDisplayOptions())) || 'Σ';
   } else if (mode === 'icon') {
+    floatingBubbleRenderedBitmapHeight = null;
     el.classList.remove('bars');
     el.textContent = 'Σ';
   } else {
+    floatingBubbleRenderedBitmapHeight = null;
     el.classList.remove('bars');
     el.textContent = state.stats ? (window.TokenMonitorTrayText.formatTrayText(state.stats, mode, currentCurrency(), compactTokenDisplayOptions()) || '0') : '0';
   }
@@ -8575,6 +8652,24 @@ function reportFloatingBubbleSize() {
   }
   window.tokenMonitor.setFloatingBubbleCollapsedSize?.({ width, height: BUBBLE_CONTENT_HEIGHT });
 }
+
+function refreshFloatingBubbleBitmapForDeviceScale() {
+  if (!state.floatingBubble.collapsed || !state.stats) return;
+  const mode = state.settings?.floatingBubbleContent || 'icon';
+  if (!window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) return;
+  // Moving the collapsed window between displays can change devicePixelRatio
+  // without changing its CSS dimensions. Repaint only when the backing height
+  // actually changes, which also avoids a size-report/resize loop.
+  const bitmapHeight = currentFloatingBubbleBitmapHeight();
+  if (bitmapHeight !== floatingBubbleRenderedBitmapHeight) renderFloatingBubbleContent();
+}
+
+const stopFloatingBubbleDeviceScaleWatcher = window.TokenMonitorTrayComposer.watchDeviceScaleChanges({
+  matchMedia: typeof window.matchMedia === 'function' ? (query) => window.matchMedia(query) : null,
+  getDevicePixelRatio: () => window.devicePixelRatio,
+  onChange: refreshFloatingBubbleBitmapForDeviceScale
+});
+window.addEventListener('unload', stopFloatingBubbleDeviceScaleWatcher, { once: true });
 
 const HOVER_REVEAL_DELAY_MS = 250;
 const HOVER_COLLAPSE_GRACE_MS = 200;
@@ -8837,6 +8932,7 @@ function syncHubModeUi() {
   }
   renderSyncClientStatus();
   renderHubBuildStatus();
+  syncHubSaveButton();
 }
 
 function renderHubStatus() {
@@ -9040,16 +9136,46 @@ const HUB_DRAFT_FIELDS = [
 ];
 const hubDraftDirty = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [field, false]));
 const hubDraftRevisions = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [field, 0]));
+let hubSaveBusy = false;
+let hubSaveInFlightRevisions = null;
+
+function hubDraftFieldIsActive(field) {
+  return field !== 'hubHostPort' || state.settings?.hubMode === 'host';
+}
+
+function syncHubDraftDirty(field) {
+  // Inactive fields stop affecting Save, but their drafts must survive mode switches.
+  if (!hubDraftFieldIsActive(field)) return;
+  const submittedRevision = hubSaveInFlightRevisions?.[field];
+  if (submittedRevision !== undefined && hubDraftRevisions[field] > submittedRevision) {
+    hubDraftDirty[field] = true;
+    return;
+  }
+  const inputId = HUB_DRAFT_FIELDS.find(([name]) => name === field)?.[1];
+  const input = inputId ? els[inputId] : null;
+  const savedValue = state.settings?.[field];
+  hubDraftDirty[field] = Boolean(input) && (
+    normalizeHubDraftValue(field, input.value, savedValue) !== normalizeHubDraftValue(field, savedValue)
+  );
+}
+
+function reconcileHubDraftDirtyState() {
+  for (const [field] of HUB_DRAFT_FIELDS) {
+    if (hubDraftDirty[field]) syncHubDraftDirty(field);
+  }
+}
 
 function markHubDraftDirty(field) {
   const inputId = HUB_DRAFT_FIELDS.find(([name]) => name === field)?.[1];
   const input = inputId ? els[inputId] : null;
   if (!input) return;
   hubDraftRevisions[field] += 1;
-  hubDraftDirty[field] = true;
+  syncHubDraftDirty(field);
+  syncHubSaveButton();
 }
 
 function syncHubDraftFields() {
+  reconcileHubDraftDirtyState();
   for (const [field, inputId] of HUB_DRAFT_FIELDS) {
     const input = els[inputId];
     if (!input || hubDraftDirty[field]) continue;
@@ -9057,12 +9183,58 @@ function syncHubDraftFields() {
       ? String(state.settings?.hubHostPort || 17321)
       : state.settings?.[field] || '';
   }
+  syncHubSaveButton();
 }
 
-function normalizeHubDraftValue(field, value) {
-  if (field === 'hubHostPort') return String(Number(value) || 17321);
+// Keep this aligned with main's normalizeHubPort: dirty state must describe
+// the value settings:update will actually persist, including its fallback.
+function normalizeHubDraftPort(value, fallback = 17321) {
+  const fallbackNumber = Math.floor(Number(fallback));
+  const normalizedFallback = Number.isFinite(fallbackNumber) && fallbackNumber >= 1 && fallbackNumber <= 65535
+    ? fallbackNumber
+    : 17321;
+  const number = Math.floor(Number(value));
+  return String(Number.isFinite(number) && number >= 1 && number <= 65535 ? number : normalizedFallback);
+}
+
+function normalizeHubDraftValue(field, value, fallback) {
+  if (field === 'hubHostPort') return normalizeHubDraftPort(value, fallback);
   if (field === 'secret') return String(value ?? '');
   return String(value ?? '').trim();
+}
+
+function hubDraftValuesFromInputs() {
+  const values = {};
+  for (const [field, inputId] of HUB_DRAFT_FIELDS) {
+    if (field === 'hubHostPort' && state.settings?.hubMode !== 'host') continue;
+    const input = els[inputId];
+    if (!input) continue;
+    values[field] = normalizeHubDraftValue(field, input.value, state.settings?.[field]);
+  }
+  return values;
+}
+
+function hubDraftValuesFromSettings() {
+  const values = {};
+  for (const [field] of HUB_DRAFT_FIELDS) {
+    if (field === 'hubHostPort' && state.settings?.hubMode !== 'host') continue;
+    values[field] = normalizeHubDraftValue(field, state.settings?.[field]);
+  }
+  return values;
+}
+
+function hubDraftHasChanges() {
+  const draft = hubDraftValuesFromInputs();
+  const saved = hubDraftValuesFromSettings();
+  return Object.keys(draft).some((field) => draft[field] !== saved[field]);
+}
+
+function syncHubSaveButton() {
+  if (!els.saveSettingsButton) return;
+  const busy = hubSaveBusy;
+  els.saveSettingsButton.disabled = busy || !hubDraftHasChanges();
+  if (busy) els.saveSettingsButton.setAttribute('aria-busy', 'true');
+  else els.saveSettingsButton.removeAttribute('aria-busy');
 }
 
 function reconcileHubDraftsAfterSave(submitted, submittedRevisions) {
@@ -9070,7 +9242,7 @@ function reconcileHubDraftsAfterSave(submitted, submittedRevisions) {
     const input = els[inputId];
     if (!input) continue;
     if (!Object.prototype.hasOwnProperty.call(submitted, field)) continue;
-    const current = normalizeHubDraftValue(field, input.value);
+    const current = normalizeHubDraftValue(field, input.value, submitted[field]);
     if (
       hubDraftRevisions[field] === submittedRevisions[field]
       && current === submitted[field]
@@ -9218,9 +9390,11 @@ function syncSettingsForm() {
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
   renderExternalProviderStatus('trae');
+  renderExternalProviderStatus('zed');
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
+  renderAntigravityStatus();
   renderMimoStatus();
   renderCopilotStatus();
   renderViewPreferences();
@@ -10444,7 +10618,7 @@ function relativeDayLabel(day) {
   return day;
 }
 
-function clientHealthActions(clientId) {
+function clientHealthActions(clientId, detail) {
   const actions = document.createElement('div');
   actions.className = 'tool-health-actions';
   const button = (labelKey, onClick) => {
@@ -10456,6 +10630,8 @@ function clientHealthActions(clientId) {
     actions.append(control);
     return control;
   };
+  const syncLockBlocked = clientId === 'antigravity'
+    && detail?.notes?.some((note) => note.code === 'sync-lock-present');
   // The detail is already bound to the exact local device. Renderer mode is a
   // transport state (`local`/`sync`), not topology, so host and client collectors
   // expose the same targeted capability through preload.
@@ -10468,27 +10644,61 @@ function clientHealthActions(clientId) {
     feedback.dataset.healthAction = 'rescan-feedback';
     feedback.setAttribute('role', 'status');
     feedback.setAttribute('aria-live', 'polite');
-    feedback.textContent = rescanState.failed ? t('settings.tools.health.rescanFailed') : '';
-    const rescan = button('settings.tools.health.rescan', async () => {
-      const requestId = state.clientRescans.begin(clientId);
-      let succeeded = false;
-      try {
-        succeeded = await window.tokenMonitor.rescanClient(clientId) === true;
-        if (succeeded) loadClientSources(clientId, { force: true });
-      } catch (_) {
-        succeeded = false;
-      } finally {
-        state.clientRescans.finish(clientId, requestId, succeeded);
-      }
-    });
-    rescan.dataset.healthAction = 'rescan';
-    rescan.id = `toolHealthRescan-${clientId}`;
-    rescan.disabled = rescanState.pending;
+    const feedbackCode = rescanState.feedbackCode;
+    feedback.textContent = feedbackCode
+      ? t(feedbackCode === 'rescan-failed'
+        ? 'settings.tools.health.rescanFailed'
+        : `settings.tools.health.repairFeedback.${feedbackCode}`)
+      : '';
+    if (syncLockBlocked && typeof window.tokenMonitor?.repairClientSyncLock === 'function') {
+      const repair = button(
+        rescanState.pending ? 'settings.tools.health.repairing' : 'settings.tools.health.repairAndRescan',
+        async () => {
+          if (!window.confirm(t('settings.tools.health.repairConfirm'))) return;
+          const requestId = state.clientRescans.begin(clientId);
+          let result = { ok: false, code: 'repair-failed' };
+          try {
+            result = await window.tokenMonitor.repairClientSyncLock(clientId);
+            if (result?.ok === true) loadClientSources(clientId, { force: true });
+          } catch (_) {
+            result = { ok: false, code: 'repair-failed' };
+          } finally {
+            state.clientRescans.finish(clientId, requestId, result?.ok === true, result?.code || 'repair-failed');
+          }
+        }
+      );
+      repair.classList.add('is-repair');
+      repair.dataset.healthAction = 'repair-sync-lock';
+      repair.id = `toolHealthRepair-${clientId}`;
+      repair.disabled = rescanState.pending;
+    } else {
+      const rescan = button('settings.tools.health.rescan', async () => {
+        const requestId = state.clientRescans.begin(clientId);
+        let succeeded = false;
+        try {
+          succeeded = await window.tokenMonitor.rescanClient(clientId) === true;
+          if (succeeded) loadClientSources(clientId, { force: true });
+        } catch (_) {
+          succeeded = false;
+        } finally {
+          state.clientRescans.finish(clientId, requestId, succeeded, succeeded ? '' : 'rescan-failed');
+        }
+      });
+      rescan.dataset.healthAction = 'rescan';
+      rescan.id = `toolHealthRescan-${clientId}`;
+      rescan.disabled = rescanState.pending;
+    }
     actions.append(feedback);
   }
   // Only where something was actually found: the button opens the first existing
   // root, and offering it for a tool with none would open nothing.
-  if ((exactLocalClientSources(clientId) || []).some((source) => source.dir && source.exists)) {
+  if (syncLockBlocked && typeof window.tokenMonitor?.revealClientSyncLock === 'function') {
+    const revealLock = button('settings.tools.health.revealSyncLock', () => {
+      void window.tokenMonitor.revealClientSyncLock(clientId);
+    });
+    revealLock.dataset.healthAction = 'reveal-sync-lock';
+    revealLock.id = `toolHealthRevealLock-${clientId}`;
+  } else if ((exactLocalClientSources(clientId) || []).some((source) => source.dir && source.exists)) {
     const reveal = button('settings.tools.health.reveal', () => { void window.tokenMonitor?.revealClientSource?.(clientId); });
     reveal.dataset.healthAction = 'reveal';
     reveal.id = `toolHealthReveal-${clientId}`;
@@ -10514,7 +10724,7 @@ function clientHealthPanel(detail, clientId) {
       detail.notes.filter((note) => note.group === group.id)
     ));
   }
-  box.append(groups, clientHealthActions(clientId));
+  box.append(groups, clientHealthActions(clientId, detail));
   return inner;
 }
 
@@ -10898,8 +11108,11 @@ function renderLimitProviderCheckboxesNow() {
     }
     for (const tagInfo of tagInfos) {
       if ((detected || !isEnabled) && tagInfo.kind === 'status') continue;
+      // Account groups own their configuration summary on the right. Avoid
+      // repeating "Not set up" beside the same account state, as with Codex.
+      if (accountGroup && provider.status === 'notConfigured' && tagInfo.kind === 'status') continue;
       const duplicatesInlineSetup = tagInfo.kind === 'capability'
-        && ((connectionDetailKey && tagInfo.label === 'Auto')
+        && ((connectionDetailKey && !accountGroup && tagInfo.label === 'Auto')
           || (accountGroup && tagInfo.label === 'Manual login'));
       if (duplicatesInlineSetup) continue;
       const tag = document.createElement('span');
@@ -10913,7 +11126,9 @@ function renderLimitProviderCheckboxesNow() {
     const actions = document.createElement('span');
     actions.className = 'limit-provider-actions';
     const accountStatus = limitProviderAccountStatus(id);
-    if (connectionDetailKey) {
+    // Multi-account providers use this space for their account summary. Their
+    // automatic collection support stays with the capability tags on the left.
+    if (connectionDetailKey && !accountGroup) {
       const mode = document.createElement('span');
       mode.className = 'cursor-status-pill limit-provider-mode-pill';
       mode.textContent = t('settings.limits.connection.autoDetect');
@@ -11081,6 +11296,11 @@ const LIMIT_PROVIDER_SETTINGS = {
     defaultValue: true
   }],
   codex: [{
+    key: 'showCodexAdditionalLimits',
+    titleKey: 'settings.limits.codexAdditionalLimits',
+    descKey: 'settings.limits.codexAdditionalLimitsDesc',
+    defaultValue: true
+  }, {
     key: 'codexResetForecastEnabled',
     titleKey: 'settings.limits.codexResetForecast',
     descKey: 'settings.limits.codexResetForecastDesc',
@@ -11751,25 +11971,30 @@ els.settingsButton.addEventListener('click', (event) => {
   ensureServiceStatusTicker();
 });
 els.saveSettingsButton.addEventListener('click', async () => {
-  const submittedHubFields = {
-    hubUrl: els.hubUrlInput.value.trim(),
-    secret: els.secretInput.value,
-    deviceId: els.deviceIdInput.value.trim()
-  };
-  const patch = { ...submittedHubFields };
-  if (state.settings.hubMode === 'host') {
-    const hubHostPort = Number(els.hubPortInput.value) || 17321;
-    submittedHubFields.hubHostPort = String(hubHostPort);
-    patch.hubHostPort = hubHostPort;
+  if (hubSaveBusy || !hubDraftHasChanges()) return;
+  hubSaveBusy = true;
+  syncHubSaveButton();
+  try {
+    const submittedHubFields = hubDraftValuesFromInputs();
+    const patch = { ...submittedHubFields };
+    if (Object.prototype.hasOwnProperty.call(submittedHubFields, 'hubHostPort')) {
+      patch.hubHostPort = Number(submittedHubFields.hubHostPort) || 17321;
+    }
+    const submittedHubRevisions = Object.fromEntries(
+      Object.keys(submittedHubFields).map((field) => [field, hubDraftRevisions[field]])
+    );
+    hubSaveInFlightRevisions = submittedHubRevisions;
+    await saveSettings(patch);
+    reconcileHubDraftsAfterSave(submittedHubFields, submittedHubRevisions);
+    await refreshHubInfo();
+    void refreshHubBuildStatus();
+    await refreshStats();
+  } finally {
+    hubSaveInFlightRevisions = null;
+    syncHubDraftFields();
+    hubSaveBusy = false;
+    syncHubSaveButton();
   }
-  const submittedHubRevisions = Object.fromEntries(
-    Object.keys(submittedHubFields).map((field) => [field, hubDraftRevisions[field]])
-  );
-  await saveSettings(patch);
-  reconcileHubDraftsAfterSave(submittedHubFields, submittedHubRevisions);
-  await refreshHubInfo();
-  void refreshHubBuildStatus();
-  await refreshStats();
 });
 
 els.hubModeOptions.addEventListener('change', async (event) => {
@@ -12077,13 +12302,17 @@ els.showCompactTotalTokensInput.addEventListener('change', async () => {
 els.compactTokenUnitsInput?.addEventListener('change', async () => {
   await saveAppearanceFromControls();
 });
-window.addEventListener('resize', () => { if (!numberAnimHandle) fitTotalNumber(); });
+window.addEventListener('resize', () => {
+  if (!numberAnimHandle) fitTotalNumber();
+  refreshFloatingBubbleBitmapForDeviceScale();
+});
 els.swapSettingsRefreshInput.addEventListener('change', () => {
   applyControlLayout(els.swapSettingsRefreshInput.checked);
   void saveAppearanceFromControls();
 });
 els.discordRpcInput.addEventListener('change', saveAppearanceFromControls);
 els.windowBehaviorInput.addEventListener('change', () => saveSettings({ windowBehavior: els.windowBehaviorInput.value }));
+els.keepAboveTaskbarInput?.addEventListener('change', () => saveSettings({ keepAboveTaskbar: els.keepAboveTaskbarInput.checked }));
 els.floatingBubbleInput.addEventListener('change', () => {
   state.settings.floatingBubbleEnabled = els.floatingBubbleInput.checked;
   els.floatingBubbleOptions?.classList.toggle('hidden', !els.floatingBubbleInput.checked);
@@ -12349,6 +12578,7 @@ function renderStatsUpdate() {
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
   renderExternalProviderStatus('trae');
+  renderExternalProviderStatus('zed');
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
@@ -13405,7 +13635,7 @@ function trayComposerPreview(surface) {
     // icons in colour, so no templateIconColor here — that is a menu-bar-only
     // requirement and would preview the bubble as monochrome.
     return {
-      src: trayDataUrlForMode(mode, 44, floatingBubbleGeneratedColors(), {
+      src: trayDataUrlForMode(mode, currentFloatingBubbleBitmapHeight(), floatingBubbleGeneratedColors(), {
         stats,
         layout: state.settings?.[layoutKey],
         contentOnly: mode === 'barsAllSessions' || mode === 'limitsAllSessions',
@@ -13632,6 +13862,10 @@ function setCodexAccountExpanded(expanded) {
 
 function setCursorAccountExpanded(expanded) {
   setAccountGroupExpanded('cursor', expanded, 'cursorAccountExpanded');
+}
+
+function setAntigravityAccountExpanded(expanded) {
+  setAccountGroupExpanded('antigravity', expanded, 'antigravityAccountExpanded');
 }
 
 function setOpencodeCookieExpanded(expanded) {
@@ -13973,6 +14207,128 @@ function clearDeepseekProviderStatus() {
   state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'deepseek');
 }
 
+function renderAntigravityStatus() {
+  if (!isSettingsSurfaceVisible()) return;
+  const statusEl = document.getElementById('antigravityAccountStatus');
+  const listEl = document.getElementById('antigravityAccountList');
+  const errorEl = document.getElementById('antigravityAccountErrorMessage');
+  const statusMessage = document.getElementById('antigravityLoginStatus');
+  const addButton = document.getElementById('antigravityAddAccountButton');
+  const cancelButton = document.getElementById('antigravityCancelLoginButton');
+  if (!statusEl || !listEl || !errorEl || !addButton || !cancelButton) return;
+  const accounts = state.settings?.antigravityManagedAccounts || [];
+  const enabledCount = accounts.filter((account) => account.enabled !== false).length;
+  setCursorStatusText(statusEl, accounts.length === 0
+    ? t('settings.antigravity.notConfigured')
+    : t('settings.antigravity.connected', { linked: enabledCount, total: accounts.length }));
+  errorEl.textContent = state.antigravityAccountError || '';
+  errorEl.classList.toggle('hidden', !state.antigravityAccountError);
+  addButton.disabled = state.antigravitySignInBusy;
+  addButton.textContent = t(state.antigravitySignInBusy
+    ? 'settings.antigravity.waitingForGoogle'
+    : 'settings.antigravity.addAccount');
+  cancelButton.classList.toggle('hidden', !state.antigravitySignInBusy);
+  if (statusMessage) {
+    statusMessage.textContent = state.antigravitySignInBusy ? t('settings.antigravity.loginStatus') : '';
+    statusMessage.classList.toggle('hidden', !state.antigravitySignInBusy);
+  }
+
+  listEl.replaceChildren();
+  if (accounts.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'settings-note';
+    empty.textContent = t('settings.antigravity.empty');
+    listEl.append(empty);
+  }
+  const antigravityProviders = localProviderStatuses('antigravity');
+  accounts.forEach((account, index) => {
+    const enabled = account.enabled !== false;
+    const accountName = String(account.accountEmail || account.accountLabel || '').trim()
+      || t('settings.antigravity.accountFallback', { number: index + 1 });
+    const row = document.createElement('div');
+    row.className = 'managed-account-row';
+    row.classList.toggle('disabled', !enabled);
+
+    const input = document.createElement('input');
+    input.className = 'managed-account-checkbox';
+    input.type = 'checkbox';
+    input.checked = enabled;
+    input.disabled = state.antigravitySignInBusy;
+    input.setAttribute('aria-label', t('settings.antigravity.toggleAccount', { account: accountName }));
+    input.addEventListener('change', async () => {
+      input.disabled = true;
+      const result = await window.tokenMonitor.antigravity.setAccountEnabled(account.id, input.checked);
+      if (!result?.ok) state.antigravityAccountError = result?.error || t('settings.antigravity.toggleFailed');
+      else {
+        state.antigravityAccountError = '';
+        state.settings.antigravityManagedAccounts = result.accounts || [];
+      }
+      renderAntigravityStatus();
+      renderSettingsSummaries();
+    });
+
+    const main = document.createElement('div');
+    main.className = 'managed-account-main';
+    const email = document.createElement('div');
+    email.className = 'managed-account-email';
+    email.textContent = accountName;
+    main.append(email);
+
+    const right = document.createElement('span');
+    right.className = 'managed-account-right';
+    const info = document.createElement('span');
+    info.className = 'managed-account-info';
+    const accountKey = String(account.accountKey || '').trim();
+    const accountEmail = String(account.accountEmail || '').trim().toLowerCase();
+    const provider = antigravityProviders.find((candidate) => {
+      const providerKey = String(candidate?.accountKey || '').trim();
+      const providerEmail = String(candidate?.accountEmail || '').trim().toLowerCase();
+      if (accountKey && providerKey) return accountKey === providerKey;
+      return Boolean(accountEmail && providerEmail && accountEmail === providerEmail);
+    });
+    const planLabel = limitProviderPresentationApi.limitProviderDisplayLabel(provider?.accountLabel);
+    const statusLabel = provider && provider.status !== 'ok'
+      ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
+      : '';
+    info.textContent = enabled ? (planLabel || statusLabel) : t('settings.antigravity.disabled');
+    info.title = provider?.actionRequired === 'accountVerification'
+      ? t('settings.antigravity.verificationRequiredDetail')
+      : info.textContent;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'managed-account-remove';
+    remove.textContent = '✕';
+    remove.title = t('settings.antigravity.remove');
+    remove.setAttribute('aria-label', t('settings.antigravity.remove'));
+    remove.disabled = state.antigravitySignInBusy;
+    let confirmingRemove = false;
+    remove.addEventListener('click', async () => {
+      if (!confirmingRemove) {
+        confirmingRemove = true;
+        remove.classList.add('confirming');
+        remove.textContent = '✓';
+        remove.title = t('settings.antigravity.removeConfirm', { account: accountName });
+        remove.setAttribute('aria-label', remove.title);
+        return;
+      }
+      remove.disabled = true;
+      const result = await window.tokenMonitor.antigravity.removeAccount(account.id);
+      if (!result?.ok) state.antigravityAccountError = result?.error || t('settings.antigravity.removeFailed');
+      else {
+        state.antigravityAccountError = '';
+        state.settings.antigravityManagedAccounts = result.accounts || [];
+        refreshStats({ force: true }).catch(() => {});
+      }
+      renderAntigravityStatus();
+      renderSettingsSummaries();
+    });
+    right.append(info, remove);
+    row.append(input, main, right);
+    listEl.append(row);
+  });
+  renderSettingsSummaries();
+}
+
 function renderMimoStatus() {
   if (!isSettingsSurfaceVisible()) return;
   const statusEl = document.getElementById('mimoAccountStatus');
@@ -14167,6 +14523,11 @@ const externalLimitAccountConfig = {
     sourceKey: 'traeAccessTokenSource',
     pendingKey: 'traePendingCheckSince'
   },
+  zed: {
+    configuredKey: 'zedCookieConfigured',
+    sourceKey: 'zedCookieSource',
+    pendingKey: 'zedPendingCheckSince'
+  },
   commandcode: {
     configuredKey: 'commandcodeCookieConfigured',
     sourceKey: 'commandcodeCookieSource',
@@ -14358,6 +14719,10 @@ function commandcodePlatformUrl() {
   // path resolves to it and bounces through signin?returnTo= when signed out,
   // so it is the one link that works without knowing the username.
   return 'https://commandcode.ai/settings/usage';
+}
+
+function zedPlatformUrl() {
+  return 'https://dashboard.zed.dev/';
 }
 
 function ollamaValidationError(provider) {
@@ -16695,6 +17060,57 @@ function setupCursorAccountUI() {
     });
   }
 
+  const zedToggle = document.getElementById('zedSettingsToggle');
+  if (zedToggle) {
+    zedToggle.addEventListener('click', () => setExternalAccountExpanded('zed', !state.zedAccountExpanded));
+    setExternalAccountExpanded('zed', false);
+    renderExternalProviderStatus('zed');
+
+    document.getElementById('zedOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal(zedPlatformUrl());
+    });
+
+    document.getElementById('zedLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ zedCookie: '' });
+      clearExternalProviderCheckPending('zed');
+      clearExternalProviderPendingStatus('zed');
+      renderExternalProviderStatus('zed');
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('zedRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+
+    document.getElementById('zedCookieSubmit').addEventListener('click', async () => {
+      const input = document.getElementById('zedCookieInput');
+      const errorEl = document.getElementById('zedErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.zed.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('zed');
+        await saveSettings({
+          zedCookie: input.value,
+          limitProviders: limitProviderSelectionIncluding('zed'),
+          limitsEnabled: true
+        });
+        input.value = '';
+        renderExternalProviderStatus('zed');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('zed', !externalProviderAccountLinked('zed'));
+        renderExternalProviderStatus('zed');
+      } catch (err) {
+        clearExternalProviderCheckPending('zed');
+        errorEl.textContent = t('settings.zed.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
+
   const commandcodeToggle = document.getElementById('commandcodeSettingsToggle');
   if (commandcodeToggle) {
     commandcodeToggle.addEventListener('click', () => setExternalAccountExpanded('commandcode', !state.commandcodeAccountExpanded));
@@ -16876,6 +17292,65 @@ function setupCursorAccountUI() {
         errorEl.textContent = t('settings.kimi.saveFailed', { message: err.message });
         errorEl.classList.remove('hidden');
       }
+    });
+  }
+
+  const antigravityToggle = document.getElementById('antigravitySettingsToggle');
+  if (antigravityToggle && window.tokenMonitor.antigravity) {
+    antigravityToggle.addEventListener('click', () => {
+      setAntigravityAccountExpanded(!state.antigravityAccountExpanded);
+    });
+    setAntigravityAccountExpanded(false);
+    renderAntigravityStatus();
+
+    window.tokenMonitor.antigravity.onAccounts((accounts) => {
+      state.settings.antigravityManagedAccounts = accounts || [];
+      renderAntigravityStatus();
+    });
+    window.tokenMonitor.antigravity.accounts().then((accounts) => {
+      state.settings.antigravityManagedAccounts = accounts || [];
+      renderAntigravityStatus();
+    }).catch(() => {});
+
+    document.getElementById('antigravityAddAccountButton').addEventListener('click', async () => {
+      if (state.antigravitySignInBusy) return;
+      state.antigravitySignInBusy = true;
+      state.antigravityAccountError = '';
+      renderAntigravityStatus();
+      let result;
+      try {
+        result = await window.tokenMonitor.antigravity.addAccount();
+      } catch (error) {
+        result = { ok: false, error: error.message };
+      } finally {
+        state.antigravitySignInBusy = false;
+      }
+      if (!result?.ok && result?.errorCode !== 'cancelled') {
+        const errorKeys = {
+          OAUTH_CLIENT_NOT_FOUND: 'settings.antigravity.oauthClientMissing',
+          TIMEOUT: 'settings.antigravity.loginTimeout',
+          STATE_MISMATCH: 'settings.antigravity.loginStateMismatch',
+          credentialStorageUnavailable: 'settings.antigravity.credentialStorageUnavailable',
+          loginInProgress: 'settings.antigravity.loginInProgress'
+        };
+        state.antigravityAccountError = errorKeys[result?.errorCode]
+          ? t(errorKeys[result.errorCode])
+          : result?.error || t('settings.antigravity.loginFailed');
+      } else if (result?.ok) {
+        state.antigravityAccountError = '';
+        state.settings.antigravityManagedAccounts = result.accounts || [];
+        // Match the Codex account flow: the account is connected as soon as its
+        // credential is stored. Quota onboarding and refresh continue in the
+        // background instead of leaving the login button visually busy.
+        refreshStats({ force: true }).catch(() => {});
+      }
+      renderAntigravityStatus();
+    });
+
+    document.getElementById('antigravityCancelLoginButton').addEventListener('click', async () => {
+      await window.tokenMonitor.antigravity.cancelLogin();
+      state.antigravitySignInBusy = false;
+      renderAntigravityStatus();
     });
   }
 
@@ -17108,6 +17583,7 @@ function initSettingsAnimationWrappers() {
     '#volcengineManualPanel',
     '#qoderManualPanel',
     '#traeManualPanel',
+    '#zedManualPanel',
     '#commandcodeManualPanel',
     '#kimiManualPanel',
     '#ollamaManualPanel'

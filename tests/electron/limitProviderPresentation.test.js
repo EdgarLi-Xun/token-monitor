@@ -18,6 +18,7 @@ const {
   limitProviderCompactWindowPeriodLabel,
   limitProviderCompactWindows,
   limitProviderMainDeviceLabel,
+  limitProviderPlanDisplayLabel,
   namedApiProfileStatus,
   limitProviderProvenance,
   limitResetRemainingMs,
@@ -54,6 +55,15 @@ test('limitProviderDisplayLabel normalizes short account labels without rewritin
   assert.equal(limitProviderDisplayLabel('Team'), 'Team');
   assert.equal(limitProviderDisplayLabel('primary.user@example.com'), 'primary.user@example.com');
   assert.equal(limitProviderDisplayLabel(''), '');
+});
+
+test('Zed plan labels omit only the redundant provider prefix', () => {
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Student'), 'Student');
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Pro'), 'Pro');
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Pro Trial'), 'Pro Trial');
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Zed Business'), 'Business');
+  assert.equal(limitProviderPlanDisplayLabel('zed', 'Custom Enterprise'), 'Custom Enterprise');
+  assert.equal(limitProviderPlanDisplayLabel('codex', 'ChatGPT Plus'), 'ChatGPT Plus');
 });
 
 test('Codex additional quota display names map gpt-reserve and preserve unknown names', () => {
@@ -330,7 +340,7 @@ test('capability tags explain how each provider is collected in settings', () =>
   assert.deepEqual(limitProviderCapabilityTags('claude'), ['Auto', 'OAuth/CLI', 'Web']);
   assert.deepEqual(limitProviderCapabilityTags('codex'), ['Auto', 'OAuth/App/CLI']);
   assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Auto', 'Web']);
-  assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['App/CLI must be open', 'RPC']);
+  assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['Auto', 'OAuth/App/CLI']);
   assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Auto', 'API/Web']);
   assert.deepEqual(limitProviderCapabilityTags('minimax'), ['Token Plan', 'API key']);
   assert.deepEqual(limitProviderCapabilityTags('grok'), ['Auto', 'CLI/Web']);
@@ -427,18 +437,15 @@ test('undetected settings tags include status and supported collection hints', (
       .map((tag) => tag.label),
     ['Not set up', 'Auto', 'OAuth/App/CLI']
   );
-  // Antigravity's "App/CLI must be open" capability restates the notConfigured
-  // status ("Open app or CLI"), so it is dropped to avoid a duplicate tag.
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'antigravity', status: 'notConfigured', source: 'rpc' })
       .map((tag) => tag.label),
-    ['Open app or CLI', 'RPC']
+    ['Not set up', 'Auto', 'OAuth/App/CLI']
   );
-  // Other failure states don't say "Open app or CLI", so the hint stays useful.
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'antigravity', status: 'unavailable', source: 'rpc' })
       .map((tag) => tag.label),
-    ['Unavailable', 'App/CLI must be open', 'RPC']
+    ['Unavailable', 'Auto', 'OAuth/App/CLI']
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'cursor', status: 'notConfigured', source: 'web' })
@@ -460,6 +467,11 @@ test('detected settings tags show only current source after status', () => {
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'cursor', status: 'ok', source: 'web' })
+      .map((tag) => tag.label),
+    ['Linked', 'Web']
+  );
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'zed', status: 'ok', source: 'web' })
       .map((tag) => tag.label),
     ['Linked', 'Web']
   );
@@ -876,6 +888,73 @@ test('Grok renders its single Monthly billing window full-width instead of an em
   assert.match(renderProviderWindows, /limit-window-wide/);
 });
 
+test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with a Limits icon', () => {
+  const app = readRendererFile('app.js');
+  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const css = readRendererFile('styles.css');
+
+  assert.match(renderProviderWindows, /provider\.provider === 'zed'/);
+  assert.match(renderProviderWindows, /windowsForKind\(provider, 'billing'\)/);
+  assert.match(renderProviderWindows, /billing\?\.limitId === 'zed\.edit-predictions'/);
+  assert.match(renderProviderWindows, /billing\?\.label \|\| 'Token Spend'/);
+  // The money belongs in the detail slot under the bar, not in the headline
+  // value: a valueOverride also disables the showLimitUsed flip for the row.
+  assert.match(
+    renderProviderWindows,
+    /limitWindowNode\(\s*billing\?\.label \|\| 'Token Spend',\s*billing,\s*color,\s*0\.95,\s*null,\s*formatZedBillingDetail\(billing\)\s*\)/
+  );
+  assert.doesNotMatch(renderProviderWindows, /settings\.subscriptions\.renewsOn|renewalDetail/);
+  assert.doesNotMatch(renderProviderWindows, /zed\.billing-cycle|zed\.overdue-invoices/);
+  assert.match(css, /\.limit-icon-zed\s*\{[^}]*assets\/icons\/zed\.svg[^}]*\}/s);
+});
+
+test('Zed details follow showLimitUsed: counts for Edit Predictions, money for Token Spend', () => {
+  const app = readRendererFile('app.js');
+  const formatter = functionBody(app, 'formatZedBillingDetail', 'formatBalanceAmount');
+  const limitCount = functionBody(app, 'formatLimitCount', 'formatCommandcodeCreditsDetail');
+  const renderDetail = (window, showLimitUsed = false) => vm.runInNewContext(
+    `${formatter}\n${limitCount}\nformatZedBillingDetail(${JSON.stringify(window)});`,
+    {
+      state: { settings: { showLimitUsed } },
+      optionalFiniteNumber: (value) => Number.isFinite(Number(value)) ? Number(value) : null,
+      formatMoney: (value, currency) => `${currency === 'USD' ? '$' : `${currency} `}${Number(value).toFixed(2)}`
+    }
+  );
+
+  const editPredictions = { limitId: 'zed.edit-predictions', used: 500, limit: 2000 };
+  const tokenSpend = { limitId: 'zed.token-spend', used: 2.5, limit: 10, currency: 'USD' };
+
+  // Quota mode: the detail mirrors the bar, which fills with what is left.
+  assert.equal(renderDetail(editPredictions), '1500/2000');
+  assert.equal(renderDetail(tokenSpend), '$7.50 / $10.00');
+  assert.equal(renderDetail(editPredictions, true), '500/2000');
+  assert.equal(renderDetail(tokenSpend, true), '$2.50 / $10.00');
+  // Unlimited Edit Predictions carry no numbers; the headline says it instead.
+  assert.equal(renderDetail({ limitId: 'zed.edit-predictions', detail: 'Unlimited' }), '');
+});
+
+test('Zed compact windows label unlimited Edit Predictions without a fake reset', () => {
+  const editPredictions = {
+    kind: 'billing',
+    limitId: 'zed.edit-predictions',
+    label: 'Edit Predictions',
+    detail: 'Unlimited',
+    resetDescription: 'Unlimited',
+    showMeter: false
+  };
+  const tokenSpend = {
+    kind: 'billing',
+    limitId: 'zed.token-spend',
+    label: 'Token Spend',
+    usedPercent: 25
+  };
+
+  assert.deepEqual(limitProviderCompactWindows('zed', [tokenSpend, editPredictions]), [
+    tokenSpend,
+    { ...editPredictions, value: 'Unlimited', resetDescription: '' }
+  ]);
+});
+
 test('WorkBuddy renders unlimited enterprise credits without requiring a numeric balance', () => {
   const app = readRendererFile('app.js');
   const valueFunction = functionBody(app, 'creditsBalanceValue', 'mimoTokenPlanWindowFromBalance');
@@ -1046,6 +1125,7 @@ test('Copilot renders monthly Premium and Chat quotas as billing windows', () =>
 test('Codex renders Monthly quota and manual reset credits below rolling windows', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
   const codexAdditionalWindowLabel = functionBody(app, 'codexAdditionalWindowLabel', 'antigravityQuotaGroups');
   const resetCreditsValue = functionBody(app, 'formatCodexResetCreditsValue', 'codexResetCreditExpirationDates');
@@ -1068,7 +1148,11 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(renderProviderWindows, /if \(!session && !monthly\) weeklyNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(renderProviderWindows, /limitWindowNode\(monthly\.label \|\| 'Monthly', monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /monthlyNode\.classList\.add\('limit-window-wide'\);/);
-  assert.match(renderProviderWindows, /const additionalWindows = \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
+  assert.match(main, /showCodexAdditionalLimits: true/);
+  assert.match(main, /showCodexAdditionalLimits = parseBoolean\(merged\.showCodexAdditionalLimits, true\)/);
+  assert.match(main, /showCodexAdditionalLimits: parseBoolean\(patch\.showCodexAdditionalLimits \?\? settings\.showCodexAdditionalLimits, true\)/);
+  assert.match(app, /key: 'showCodexAdditionalLimits',[\s\S]*?defaultValue: true/);
+  assert.match(renderProviderWindows, /state\.settings\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
   assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
   assert.match(renderProviderWindows, /additionalNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(codexAdditionalWindowLabel, /if \(!name\) return period \|\| 'Additional limit';/);
@@ -2003,7 +2087,9 @@ test('account and automatic provider panels reuse the original account summary g
   assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus, disclosureIcon\)/);
   assert.match(renderSettings, /mode\.className = 'cursor-status-pill limit-provider-mode-pill'/);
   assert.match(renderSettings, /mode\.textContent = t\('settings\.limits\.connection\.autoDetect'\)/);
-  assert.match(renderSettings, /connectionDetailKey && tagInfo\.label === 'Auto'/);
+  assert.match(renderSettings, /connectionDetailKey && !accountGroup/);
+  assert.match(renderSettings, /accountGroup && provider\.status === 'notConfigured'/);
+  assert.match(renderSettings, /connectionDetailKey && !accountGroup && tagInfo\.label === 'Auto'/);
   assert.match(renderSettings, /accountGroup && tagInfo\.label === 'Manual login'/);
   assert.match(renderSettings, /if \(duplicatesInlineSetup\) continue/);
   assert.match(renderSettings, /main\.append\(copy, actions\)/);
@@ -2142,6 +2228,30 @@ test('account validation keeps aggregate fallback for legacy stats without devic
 });
 
 const presentation = require('../../src/electron/renderer/limitProviderPresentation');
+
+test('Antigravity uses the shared OAuth source label', () => {
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'antigravity', source: 'oauth' }), 'OAuth');
+});
+
+test('Zed identifies its manual web-session setup and dashboard source', () => {
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zed'), ['Manual login', 'Web']);
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'zed', source: 'web' }), 'Web');
+});
+
+test('Antigravity account verification is shown as an actionable status', () => {
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({
+      provider: 'antigravity',
+      status: 'unauthorized',
+      actionRequired: 'accountVerification'
+    }),
+    {
+      label: 'Open Antigravity to verify',
+      key: 'settings.antigravity.verificationRequired',
+      tone: 'setup'
+    }
+  );
+});
 
 test('deepseek source label and capability tags', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'deepseek', source: 'api' }), 'API');
