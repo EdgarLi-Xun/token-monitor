@@ -366,28 +366,6 @@ test('runCursorSync leaves headroom around Tokscale explicit sync timeout', () =
   assert.equal(CURSOR_EXPLICIT_SYNC_TIMEOUT_MS, 150_000);
 });
 
-test('runCursorSync writes a Node CSV fetch into the tokscale cache', async () => {
-  const payload = {
-    version: 1,
-    activeAccountId: 'user_a',
-    accounts: {
-      user_a: { sessionToken: 'user_a%3A%3Atok-a', userId: 'user_a' }
-    }
-  };
-  const { home, cleanup } = withTempHome(payload);
-  try {
-    const result = await runCursorSync({
-      home,
-      fetchUsageCsv: async () => 'Date,Kind,Model\n"2026-08-31T00:00:00.000Z","Included","composer"\n'
-    });
-    assert.equal(result.synced, true);
-    assert.equal(result.rows, 1);
-    assert.equal(result.notAuthenticated, false);
-    const csv = fs.readFileSync(path.join(home, '.config', 'tokscale', 'cursor-cache', 'usage.csv'), 'utf8');
-    assert.match(csv, /2026-08-31T00:00:00.000Z/);
-  } finally { cleanup(); }
-});
-
 test('runCursorSync distinguishes no account from transient JSON failures', async () => {
   const signedOut = await runCursorSync({
     runSubcommand: async () => JSON.stringify({ synced: false, rows: 0, error: 'Not authenticated' })

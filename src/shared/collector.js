@@ -18,7 +18,7 @@ const {
 } = require('./clientHealth');
 const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
 const { createTokscaleCapabilityResolver, filterSupportedClients, parseSupportedClients } = require('./tokscaleCapabilities');
-const { customPricingPath, tokscaleCacheDirs } = require('./tokscaleConfig');
+const { customPricingPath, tokscaleCacheDirs, tokscaleConfigDir, tokscaleHomeDir } = require('./tokscaleConfig');
 const {
   applyPeriodDelta,
   emptyPeriod,
@@ -1209,8 +1209,12 @@ function antigravityDataPresent(home) {
   return antigravityDataRoots(home).some(dirExists);
 }
 
-function antigravitySyncLockPath(home) {
-  return path.join(home, '.config', 'tokscale', 'antigravity-cache', 'sync.lock');
+function antigravitySyncLockPath(home, env = process.env, platform = process.platform) {
+  return path.join(
+    tokscaleConfigDir({ env, platform, homeDir: home }),
+    'antigravity-cache',
+    'sync.lock'
+  );
 }
 
 // Tokscale deliberately preserves an unknown sync.lock after a crash: an older
@@ -2332,13 +2336,20 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const xdgHome = xdgDataHome(home);
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
-  // Cursor and Antigravity caches are home-relative literals in tokscale
-  // (`cursor.rs` `cursor_cache_dir`, same shape in `antigravity.rs`), not
-  // `get_config_dir()`. On Windows that is `%USERPROFILE%\.config\tokscale\…`
-  // rather than `%APPDATA%\tokscale\…`; TOKSCALE_CONFIG_DIR is also ignored
-  // here because those modules never read it.
-  add('cursor', ['tokscale-cursor-cache', path.join(home, '.config', 'tokscale', 'cursor-cache')]);
-  add('antigravity', ['tokscale-antigravity-cache', path.join(home, '.config', 'tokscale', 'antigravity-cache')]);
+  // Tokscale resolves these two caches differently and the split is deliberate
+  // upstream, so mirror it rather than picking whichever looks tidier:
+  //   cursor.rs      — `home_dir().join(".config/tokscale/cursor-cache")`, a
+  //                    home-relative literal that never consults
+  //                    `get_config_dir()`. On Windows that is
+  //                    `%USERPROFILE%\.config\tokscale\`, not `%APPDATA%\tokscale\`,
+  //                    and TOKSCALE_CONFIG_DIR does not move it.
+  //   antigravity.rs — `paths::get_config_dir().join("antigravity-cache")`,
+  //                    routed that way on purpose so an isolated profile covers
+  //                    the sync cache too.
+  const tokscaleConfigRoot = tokscaleConfigDir({ env, platform, homeDir: home });
+  const tokscaleHome = tokscaleHomeDir({ env, platform, homeDir: home });
+  add('cursor', ['tokscale-cursor-cache', path.join(tokscaleHome, '.config', 'tokscale', 'cursor-cache')]);
+  add('antigravity', ['tokscale-antigravity-cache', path.join(tokscaleConfigRoot, 'antigravity-cache')]);
   // A whitespace-only KIMI_CODE_HOME counts as unset, matching tokscale: it
   // joins `sessions` onto the raw value, so a blank export would resolve to the
   // root-level /sessions and hide the real one.

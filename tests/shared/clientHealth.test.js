@@ -350,16 +350,15 @@ test('Claude source roots follow CLAUDE_CONFIG_DIR like tokscale', () => {
   }
 });
 
-test('self-synced cache roots stay home-relative on Windows', () => {
+// The two self-synced caches resolve differently upstream and the difference is
+// load-bearing on Windows: cursor.rs hardcodes a home-relative literal, while
+// antigravity.rs routes through get_config_dir(). Assert both in one place so a
+// future tidy-up cannot quietly collapse them onto whichever one it noticed.
+test('the Cursor cache stays home-relative while Antigravity follows the config dir', () => {
   const homeDir = 'C:\\Users\\alice';
-  const roots = clientSourceRoots('cursor,antigravity', {
-    homeDir,
-    platform: 'win32',
-    env: {
-      APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
-      TOKSCALE_CONFIG_DIR: 'C:\\iso\\tokscale'
-    }
-  });
+  const appData = 'C:\\Users\\alice\\AppData\\Roaming';
+  const env = { APPDATA: appData };
+  const roots = clientSourceRoots('cursor,antigravity', { homeDir, platform: 'win32', env });
 
   assert.deepEqual(roots.cursor, [{
     id: 'tokscale-cursor-cache',
@@ -367,12 +366,46 @@ test('self-synced cache roots stay home-relative on Windows', () => {
   }]);
   assert.deepEqual(roots.antigravity, [{
     id: 'tokscale-antigravity-cache',
-    dir: path.join(homeDir, '.config', 'tokscale', 'antigravity-cache')
+    dir: path.join(appData, 'tokscale', 'antigravity-cache')
   }]);
+  // The sync lock lives inside the Antigravity cache, so it has to move with it.
   assert.equal(
-    antigravitySyncLockPath(homeDir),
-    path.join(homeDir, '.config', 'tokscale', 'antigravity-cache', 'sync.lock')
+    antigravitySyncLockPath(homeDir, env, 'win32'),
+    path.join(appData, 'tokscale', 'antigravity-cache', 'sync.lock')
   );
+});
+
+test('TOKSCALE_CONFIG_DIR moves the Antigravity cache but not the Cursor one', () => {
+  const homeDir = 'C:\\Users\\alice';
+  const env = {
+    APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+    TOKSCALE_CONFIG_DIR: 'C:\\iso\\tokscale'
+  };
+  const roots = clientSourceRoots('cursor,antigravity', { homeDir, platform: 'win32', env });
+
+  assert.deepEqual(roots.cursor, [{
+    id: 'tokscale-cursor-cache',
+    dir: path.join(homeDir, '.config', 'tokscale', 'cursor-cache')
+  }]);
+  assert.deepEqual(roots.antigravity, [{
+    id: 'tokscale-antigravity-cache',
+    dir: path.join('C:\\iso\\tokscale', 'antigravity-cache')
+  }]);
+});
+
+// tokscale-core home_dir() prefers an absolute $HOME on Windows, and cursor.rs
+// builds its cache path on top of it, so the probe has to follow that redirect.
+test('the Cursor cache follows an absolute Windows HOME override', () => {
+  const roots = clientSourceRoots('cursor', {
+    homeDir: 'C:\\Users\\alice',
+    platform: 'win32',
+    env: { APPDATA: 'C:\\Users\\alice\\AppData\\Roaming', HOME: 'D:\\profiles\\alice' }
+  });
+
+  assert.deepEqual(roots.cursor, [{
+    id: 'tokscale-cursor-cache',
+    dir: path.join('D:\\profiles\\alice', '.config', 'tokscale', 'cursor-cache')
+  }]);
 });
 
 test('labelling roots keeps diagnostics separate from watcher roots', () => {

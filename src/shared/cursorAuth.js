@@ -4,7 +4,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const https = require('node:https');
 const { spawn } = require('node:child_process');
 const { abortReason } = require('./abortSignal');
 const {
@@ -13,20 +12,11 @@ const {
 } = require('./subprocessTermination');
 const { classifyClientSyncDetailCode } = require('./clientHealth');
 const { withCursorLifecycle } = require('./cursorLifecycle');
-const { BROWSER_USER_AGENT } = require('./browserUserAgent');
 
 const MAX_SYNC_EXIT_CODE = 2 ** 31 - 1;
 const MAX_TOKSCALE_STDERR_LENGTH = 64 * 1024;
 const CURSOR_EXPLICIT_SYNC_TIMEOUT_MS = 150_000;
 const CURSOR_DESKTOP_TOKEN_KEY = 'cursorAuth/accessToken';
-const CURSOR_USAGE_CSV_URL = 'https://cursor.com/api/dashboard/export-usage-events-csv?strategy=tokens';
-const CURSOR_MAX_CSV_BYTES = 64 * 1024 * 1024;
-const CURSOR_CSV_HEADERS = {
-  'Accept': '*/*',
-  'Accept-Language': 'en-US,en;q=0.9',
-  'Referer': 'https://cursor.com/dashboard',
-  'User-Agent': BROWSER_USER_AGENT
-};
 
 function annotateSyncError(error, failureStage, exitCode = null) {
   const target = error instanceof Error ? error : new Error(String(error || 'Cursor sync failed'));
@@ -40,30 +30,6 @@ function annotateSyncError(error, failureStage, exitCode = null) {
 
 function credentialsPath(home = os.homedir()) {
   return path.join(home, '.config', 'tokscale', 'cursor-credentials.json');
-}
-
-function cursorCacheDir(home = os.homedir()) {
-  return path.join(home, '.config', 'tokscale', 'cursor-cache');
-}
-
-function sanitizeAccountIdForFilename(accountId) {
-  const sanitized = String(accountId || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return (sanitized.slice(0, 80) || 'account');
-}
-
-function countCursorCsvRows(text) {
-  return String(text || '').split(/\r?\n/).filter((line, index) => index > 0 && line.trim()).length;
-}
-
-function writeCursorCacheFile(file, contents) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmpPath = `${file}.tmp`;
-  fs.writeFileSync(tmpPath, contents);
-  fs.renameSync(tmpPath, file);
 }
 
 function cursorDesktopStateCandidates({ home = os.homedir(), platform = process.platform, env = process.env } = {}) {
@@ -434,144 +400,9 @@ function parseCursorSyncResult(stdout) {
   };
 }
 
-function fetchCursorUsageCsv(sessionToken, {
-  timeoutMs = CURSOR_EXPLICIT_SYNC_TIMEOUT_MS,
-  signal,
-  httpsLib = https,
-  url = CURSOR_USAGE_CSV_URL
-} = {}) {
-  if (signal?.aborted) return Promise.reject(abortReason(signal, 'Cursor sync aborted'));
-  const token = String(sessionToken || '').trim();
-  if (!token) {
-    return Promise.reject(annotateSyncError(new Error('Cursor session expired. Please re-authenticate.'), 'unknown'));
-  }
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    let settled = false;
-    let req = null;
-    let timer;
-    const finish = (error, value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener?.('abort', onAbort);
-      if (error) reject(error);
-      else resolve(value);
-    };
-    const onAbort = () => {
-      const error = abortReason(signal, 'Cursor sync aborted');
-      try { req?.destroy?.(error); } catch (_) {}
-      finish(error);
-    };
-    req = httpsLib.request({
-      method: 'GET',
-      hostname: parsed.hostname,
-      path: `${parsed.pathname}${parsed.search}`,
-      headers: {
-        ...CURSOR_CSV_HEADERS,
-        Cookie: `WorkosCursorSessionToken=${token}`
-      }
-    }, (res) => {
-      if (res.statusCode === 401 || res.statusCode === 403) {
-        res.resume();
-        return finish(annotateSyncError(
-          new Error('Cursor session expired. Please re-authenticate.'),
-          'unknown'
-        ));
-      }
-      if (typeof res.statusCode !== 'number' || res.statusCode < 200 || res.statusCode >= 300) {
-        res.resume();
-        return finish(annotateSyncError(
-          new Error(`Cursor API returned status ${res.statusCode}`),
-          'unknown'
-        ));
-      }
-      const chunks = [];
-      let size = 0;
-      res.on('data', (chunk) => {
-        size += chunk.length;
-        if (size > CURSOR_MAX_CSV_BYTES) {
-          try { req.destroy(); } catch (_) {}
-          return finish(annotateSyncError(
-            new Error(`Cursor usage CSV exceeds the ${CURSOR_MAX_CSV_BYTES} byte limit`),
-            'unknown'
-          ));
-        }
-        chunks.push(chunk);
-      });
-      res.on('end', () => {
-        const text = Buffer.concat(chunks).toString('utf8');
-        if (!text.startsWith('Date,')) {
-          return finish(annotateSyncError(
-            new Error('Invalid response from Cursor API - expected CSV format'),
-            'unknown'
-          ));
-        }
-        finish(null, text);
-      });
-      res.on('error', (error) => finish(annotateSyncError(error, 'unknown')));
-    });
-    timer = setTimeout(() => {
-      const error = annotateSyncError(
-        new Error(`Cursor sync timed out after ${timeoutMs}ms`),
-        'timeout'
-      );
-      try { req.destroy(error); } catch (_) {}
-      finish(error);
-    }, timeoutMs);
-    req.on('error', (error) => finish(annotateSyncError(error, 'unknown')));
-    signal?.addEventListener?.('abort', onAbort, { once: true });
-    req.end();
-  });
-}
-
-async function syncCursorCacheFromApi(options = {}) {
-  const home = options.home || os.homedir();
-  const parsed = readCredentialsStore({ home });
-  const accounts = listAccounts({ home });
-  if (accounts.length === 0) {
-    return { synced: false, rows: 0, error: 'Not authenticated', notAuthenticated: true };
-  }
-  const fetchUsageCsv = options.fetchUsageCsv || fetchCursorUsageCsv;
-  const cacheDir = cursorCacheDir(home);
-  const activeId = typeof parsed?.activeAccountId === 'string' ? parsed.activeAccountId : accounts[0].id;
-  let totalRows = 0;
-  const errors = [];
-  for (const account of accounts) {
-    try {
-      const csvText = await fetchUsageCsv(account.sessionToken, options);
-      const fileName = account.id === activeId
-        ? 'usage.csv'
-        : `usage.${sanitizeAccountIdForFilename(account.id)}.csv`;
-      writeCursorCacheFile(path.join(cacheDir, fileName), csvText);
-      totalRows += countCursorCsvRows(csvText);
-    } catch (error) {
-      errors.push(`${account.id}: ${error?.message || error}`);
-    }
-  }
-  if (errors.length === accounts.length) {
-    throw annotateSyncError(new Error(errors[0] || 'Cursor sync failed'), 'unknown');
-  }
-  return {
-    synced: true,
-    rows: totalRows,
-    error: errors.length > 0 ? `Some accounts failed to sync (${errors.length}/${accounts.length})` : null,
-    notAuthenticated: false
-  };
-}
-
 async function runCursorSync(options = {}) {
   const { runSubcommand = runTokscaleSubcommand, ...subprocessOptions } = options;
-  const useDirectFetch = options.directFetch !== false && !options.runSubcommand && !options.spawn;
   return withCursorLifecycle(async () => {
-    if (useDirectFetch) {
-      try {
-        const direct = await syncCursorCacheFromApi(options);
-        if (direct.synced || direct.notAuthenticated) return direct;
-      } catch (error) {
-        if (options.directFetch === true) throw error;
-      }
-    }
     const stdout = await runSubcommand(
       ['sync', '--json'],
       { ...subprocessOptions, timeoutMs: options.timeoutMs ?? CURSOR_EXPLICIT_SYNC_TIMEOUT_MS }
