@@ -23,6 +23,7 @@ const {
   normalizeClientHealth
 } = require('../../src/shared/clientHealth');
 const {
+  antigravitySyncLockPath,
   clientActivityDaysFromHistory,
   clientDiagnosticRoots,
   clientSourceChecks,
@@ -368,6 +369,10 @@ test('self-synced cache roots stay home-relative on Windows', () => {
     id: 'tokscale-antigravity-cache',
     dir: path.join(homeDir, '.config', 'tokscale', 'antigravity-cache')
   }]);
+  assert.equal(
+    antigravitySyncLockPath(homeDir),
+    path.join(homeDir, '.config', 'tokscale', 'antigravity-cache', 'sync.lock')
+  );
 });
 
 test('labelling roots keeps diagnostics separate from watcher roots', () => {

@@ -1209,12 +1209,8 @@ function antigravityDataPresent(home) {
   return antigravityDataRoots(home).some(dirExists);
 }
 
-function antigravitySyncLockPath(home, env = process.env, platform = process.platform) {
-  return path.join(
-    tokscaleConfigDir({ env, platform, homeDir: home }),
-    'antigravity-cache',
-    'sync.lock'
-  );
+function antigravitySyncLockPath(home) {
+  return path.join(home, '.config', 'tokscale', 'antigravity-cache', 'sync.lock');
 }
 
 // Tokscale deliberately preserves an unknown sync.lock after a crash: an older
