@@ -10,6 +10,7 @@ const REQUEST_USAGE_URL = 'https://cursor.com/api/usage';
 const SAND_USAGE_URL = 'https://cursor.com/api/dashboard/get-sand-usage-status';
 const PLAN_INFO_URL = 'https://cursor.com/api/dashboard/get-plan-info';
 const PREPAID_BILLING_URL = 'https://cursor.com/api/dashboard/get-user-prepaid-billing';
+const CURRENT_PERIOD_USAGE_URL = 'https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage';
 const SAND_TIMEOUT_MS = 5000;
 
 const DEFAULT_HEADERS = {
@@ -118,6 +119,40 @@ function parsePrepaidBilling(input) {
   return {
     availableUsd: availableCents === null ? null : Math.max(0, availableCents) / 100
   };
+}
+
+function decimalOrNull(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+// Cursor settings reads this RPC. usage-summary can report an explicit 0 for a
+// unified plan's monthly bucket while this weekly included percent is in use.
+function parseCurrentPeriodUsage(input) {
+  const response = input && typeof input === 'object' ? input : {};
+  const plan = response.planUsage && typeof response.planUsage === 'object' ? response.planUsage : {};
+  return {
+    totalPercentUsed: clampPercent(decimalOrNull(plan.totalPercentUsed))
+  };
+}
+
+function sessionAccessToken(sessionToken) {
+  let token = String(sessionToken || '');
+  try { token = decodeURIComponent(token); } catch (_) { return ''; }
+  const separator = token.indexOf('::');
+  if (separator < 0) return '';
+  const accessToken = token.slice(separator + 2).trim();
+  return accessToken.split('.').length === 3 ? accessToken : '';
+}
+
+// Current-period usage wins, including an explicit zero. Sand is only the
+// shared unified pool; a missing period result keeps the usage-summary value.
+function unifiedIncludedPercent(summaryPercent, periodPercent, sandPercent) {
+  if (periodPercent !== null) return periodPercent;
+  if (sandPercent !== null) return sandPercent;
+  return summaryPercent;
 }
 
 function parseUsageSummary(input, { requestUsage = null, unifiedPlan = false } = {}) {
@@ -232,7 +267,8 @@ function requestJson(url, sessionToken, {
   signal,
   method = 'GET',
   headers = {},
-  body = null
+  body = null,
+  bearerToken = ''
 } = {}) {
   if (signal?.aborted) return Promise.reject(abortError(signal));
   return new Promise((resolve) => {
@@ -257,7 +293,9 @@ function requestJson(url, sessionToken, {
       headers: {
         ...DEFAULT_HEADERS,
         ...headers,
-        'Cookie': `WorkosCursorSessionToken=${sessionToken}`
+        ...(bearerToken
+          ? { Authorization: `Bearer ${bearerToken}` }
+          : { Cookie: `WorkosCursorSessionToken=${sessionToken}` })
       }
     }, (res) => {
       // Short-circuit on auth failures so we don't depend on the response stream emitting 'end'.
@@ -317,13 +355,36 @@ async function probe(sessionToken, opts = {}) {
   const planInfo = planInfoResult.ok ? parsePlanInfo(planInfoResult.json) : null;
   const unifiedPlan = planInfo ? planInfo.isMerged : grokBot?.isUnified === true;
   // Only unified (The X Subscription) plans carry a prepaid balance, so legacy
-  // plans never pay for this request.
+  // plans never pay for this request. Current-period usage is the included
+  // percent Cursor settings shows; it is best effort and must not fail the row.
   let prepaid = null;
+  let periodPercent = null;
   if (unifiedPlan) {
-    const prepaidResult = await dashboardRpc(PREPAID_BILLING_URL, sessionToken, opts, configuredTimeoutMs);
+    const accessToken = sessionAccessToken(sessionToken);
+    const [prepaidResult, periodResult] = await Promise.all([
+      dashboardRpc(PREPAID_BILLING_URL, sessionToken, opts, configuredTimeoutMs),
+      accessToken
+        ? requestJson(CURRENT_PERIOD_USAGE_URL, sessionToken, {
+          ...opts,
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'Connect-Protocol-Version': '1'
+          },
+          body: '{}',
+          bearerToken: accessToken
+        })
+        : Promise.resolve(null)
+    ]);
     if (prepaidResult.ok) prepaid = parsePrepaidBilling(prepaidResult.json);
+    if (periodResult?.ok) periodPercent = parseCurrentPeriodUsage(periodResult.json).totalPercentUsed;
   }
   const usage = { ...parseUsageSummary(usageResult.json, { requestUsage, unifiedPlan }), grokBot, planInfo, prepaid };
+  if (unifiedPlan) {
+    const sandPercent = grokBot?.isUnified === true ? grokBot.usedPercent : null;
+    usage.planPercent = unifiedIncludedPercent(usage.planPercent, periodPercent, sandPercent);
+  }
   return { ok: true, usage, user };
 }
 
@@ -333,6 +394,7 @@ module.exports = {
   parseGrokBotUsage,
   parsePlanInfo,
   parsePrepaidBilling,
+  parseCurrentPeriodUsage,
   parseUserInfo,
   probe,
   requestJson,
@@ -342,5 +404,6 @@ module.exports = {
   SAND_USAGE_URL,
   PLAN_INFO_URL,
   PREPAID_BILLING_URL,
+  CURRENT_PERIOD_USAGE_URL,
   SAND_TIMEOUT_MS
 };
