@@ -592,6 +592,60 @@ test('unified included usage falls back to the sand percent when current-period 
   assert.equal(result.windows.find((window) => window.label === 'Included usage').usedPercent, 13.087757313109426);
 });
 
+test('current-period timeout is capped and preserves fallback limits', async (t) => {
+  for (const scenario of [
+    { name: 'default timeout with sand usage', timeoutMs: undefined, expectedTimeout: 5000, sandPercent: 13, period: 'WEEKLY', expectedPercent: 13 },
+    { name: 'shorter timeout with sand zero', timeoutMs: 2000, expectedTimeout: 2000, sandPercent: 0, period: 'WEEKLY', expectedPercent: 0 },
+    { name: 'longer timeout with unknown weekly usage', timeoutMs: 20000, expectedTimeout: 5000, period: 'WEEKLY', expectedPercent: null },
+    { name: 'default timeout with monthly summary', timeoutMs: undefined, expectedTimeout: 5000, period: 'MONTHLY', expectedPercent: 30 }
+  ]) {
+    await t.test(scenario.name, async () => {
+      let timeoutMs;
+      let onTimeout;
+      let destroyed = false;
+      const payloads = {
+        '/api/usage-summary': {
+          billingCycleEnd: '2026-11-01T00:00:00Z',
+          individualUsage: { plan: { totalPercentUsed: 30 } },
+          teamUsage: { pooled: { used: 7500, limit: 10000 } }
+        },
+        '/api/dashboard/get-plan-info': { isMerged: true, planInfo: {
+          includedUsagePeriod: `INCLUDED_USAGE_PERIOD_${scenario.period}`
+        } },
+        '/api/dashboard/get-sand-usage-status': { isUnified: true, usagePercent: scenario.sandPercent },
+        '/api/dashboard/get-user-prepaid-billing': { availableCents: '1446' }
+      };
+      const result = await fetchCursorLimits({}, {
+        readActiveAccount: () => ({ id: 'acct-1', sessionToken: UNIFIED_SESSION }),
+        timeoutMs: scenario.timeoutMs,
+        httpsLib: {
+          request(opts, cb) {
+            if (opts.path !== PERIOD_USAGE_PATH) return dashboardFakeHttps(payloads).request(opts, cb);
+            const req = new EventEmitter();
+            req.write = () => {};
+            req.setTimeout = (ms, callback) => { timeoutMs = ms; onTimeout = callback; };
+            req.destroy = (error) => { destroyed = true; req.emit('error', error); };
+            // Trigger the registered socket timeout without waiting in real time.
+            req.end = () => setImmediate(() => onTimeout());
+            return req;
+          }
+        }
+      });
+      assert.equal(destroyed, true);
+      assert.equal(result.status, 'ok');
+      const included = result.windows.find((window) => window.label === 'Included usage');
+      if (scenario.expectedPercent === null) assert.equal(included, undefined);
+      else {
+        assert.equal(included?.usedPercent, scenario.expectedPercent);
+        assert.equal(included.kind, scenario.period === 'MONTHLY' ? 'billing' : 'weekly');
+      }
+      assert.equal(result.windows.find((window) => window.label === 'Prepaid balance')?.remaining, 14.46);
+      assert.equal(result.windows.find((window) => window.label === 'Team pool')?.usedPercent, 75);
+      assert.equal(timeoutMs, scenario.expectedTimeout);
+    });
+  }
+});
+
 test('an explicit current-period zero beats a nonzero sand percent', async () => {
   const result = await probe(UNIFIED_SESSION, { httpsLib: dashboardFakeHttps({
     '/api/usage-summary': { individualUsage: { plan: { totalPercentUsed: 40 } } },

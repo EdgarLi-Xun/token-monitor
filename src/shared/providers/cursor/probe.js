@@ -366,6 +366,7 @@ async function probe(sessionToken, opts = {}) {
       accessToken
         ? requestJson(CURRENT_PERIOD_USAGE_URL, sessionToken, {
           ...opts,
+          timeoutMs: Math.min(configuredTimeoutMs, SAND_TIMEOUT_MS),
           method: 'POST',
           headers: {
             Accept: 'application/json',
