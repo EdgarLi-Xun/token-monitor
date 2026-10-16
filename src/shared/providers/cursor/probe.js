@@ -147,8 +147,8 @@ function sessionAccessToken(sessionToken) {
   return accessToken.split('.').length === 3 ? accessToken : '';
 }
 
-// Current-period usage wins, including an explicit zero. Sand is only the
-// shared unified pool; a missing period result keeps the usage-summary value.
+// Current-period usage wins, including an explicit zero, then unified sand.
+// Only explicitly monthly plans receive a usage-summary fallback.
 function unifiedIncludedPercent(summaryPercent, periodPercent, sandPercent) {
   if (periodPercent !== null) return periodPercent;
   if (sandPercent !== null) return sandPercent;
@@ -383,7 +383,9 @@ async function probe(sessionToken, opts = {}) {
   const usage = { ...parseUsageSummary(usageResult.json, { requestUsage, unifiedPlan }), grokBot, planInfo, prepaid };
   if (unifiedPlan) {
     const sandPercent = grokBot?.isUnified === true ? grokBot.usedPercent : null;
-    usage.planPercent = unifiedIncludedPercent(usage.planPercent, periodPercent, sandPercent);
+    // The summary's monthly bucket cannot establish a weekly seat allowance.
+    const summaryFallback = planInfo?.includedUsagePeriod === 'monthly' ? usage.planPercent : null;
+    usage.planPercent = unifiedIncludedPercent(summaryFallback, periodPercent, sandPercent);
   }
   return { ok: true, usage, user };
 }

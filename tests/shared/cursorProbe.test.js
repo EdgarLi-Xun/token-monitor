@@ -376,30 +376,52 @@ function dashboardFakeHttps(payloads, calls = []) {
   };
 }
 
-test('unified limits through the real probe distinguish missing usage from a true zero', async () => {
+test('unified limits use summary fallback only for an explicitly monthly period', async () => {
   for (const [summary, expected] of [
     [{}, null],
     [{ individualUsage: { plan: {} } }, null],
     [{ individualUsage: { plan: { autoPercentUsed: 10, apiPercentUsed: 50 } } }, null],
     [{ individualUsage: { plan: { limit: 2000 } } }, null],
     [{ individualUsage: { plan: { totalPercentUsed: 0 } } }, 0],
+    [{ individualUsage: { plan: { totalPercentUsed: 30 } } }, 30],
     [{ individualUsage: { plan: { used: 0, limit: 2000 } } }, 0],
     [{ individualUsage: { plan: { used: 500, limit: 2000 } } }, 25]
   ]) {
-    for (const planInfo of [{ isMerged: true }, null]) {
+    for (const planInfo of [
+      { isMerged: true, planInfo: { includedUsagePeriod: 'INCLUDED_USAGE_PERIOD_WEEKLY' } },
+      { isMerged: true, planInfo: { includedUsagePeriod: 'INCLUDED_USAGE_PERIOD_MONTHLY' } },
+      { isMerged: true },
+      { isMerged: true, planInfo: { includedUsagePeriod: 'INCLUDED_USAGE_PERIOD_UNSPECIFIED' } },
+      null
+    ]) {
+      const monthly = planInfo?.planInfo?.includedUsagePeriod === 'INCLUDED_USAGE_PERIOD_MONTHLY';
       const result = await fetchCursorLimits({}, {
-        readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't' }),
+        readActiveAccount: () => ({ id: 'acct-1', sessionToken: 'user_fixture%3A%3Aaa.bb.cc' }),
         httpsLib: dashboardFakeHttps({
-          '/api/usage-summary': summary,
+          '/api/usage-summary': {
+            ...summary,
+            billingCycleEnd: '2026-11-01T00:00:00Z',
+            teamUsage: { pooled: { used: 7500, limit: 10000 } }
+          },
           '/api/dashboard/get-plan-info': planInfo,
           '/api/dashboard/get-sand-usage-status': { isUnified: true },
-          '/api/dashboard/get-user-prepaid-billing': { availableCents: '1446' }
+          '/api/dashboard/get-user-prepaid-billing': { availableCents: '1446' },
+          '/aiserver.v1.DashboardService/GetCurrentPeriodUsage': null
         })
       });
       const included = result.windows.find((window) => window.label === 'Included usage');
       assert.equal(result.status, 'ok');
-      if (expected === null) assert.equal(included, undefined, JSON.stringify(summary));
-      else assert.equal(included?.usedPercent, expected);
+      if (!monthly || expected === null) assert.equal(included, undefined, JSON.stringify({ summary, planInfo }));
+      else {
+        assert.equal(included?.usedPercent, expected);
+        assert.equal(included.kind, 'billing');
+        assert.equal(included.resetsAt, '2026-11-01T00:00:00.000Z');
+        assert.equal(included.windowMinutes, null);
+      }
+      const team = result.windows.find((window) => window.label === 'Team pool');
+      assert.equal(team?.usedPercent, 75);
+      assert.equal(team.kind, 'billing');
+      assert.equal(team.resetsAt, '2026-11-01T00:00:00.000Z');
       assert.equal(result.windows.find((window) => window.label === 'Prepaid balance')?.remaining, 14.46);
       assert.ok(!result.windows.some((window) => ['Cursor Models', 'Other Models'].includes(window.label)));
     }
@@ -414,6 +436,7 @@ test('unified limits never reuse legacy overall or team usage as the included po
     { isMerged: false }
   ]) {
     const unified = planInfo?.isMerged !== false;
+    const monthly = planInfo?.planInfo?.includedUsagePeriod === 'INCLUDED_USAGE_PERIOD_MONTHLY';
     for (const overall of [undefined, { used: 1000, limit: 2000 }]) {
       for (const [plan, expected] of [[{}, null], [{ totalPercentUsed: 0 }, 0], [{ used: 500, limit: 2000 }, 25]]) {
         const result = await fetchCursorLimits({}, {
@@ -431,7 +454,7 @@ test('unified limits never reuse legacy overall or team usage as the included po
         });
         assert.equal(result.status, 'ok');
         const included = result.windows.find((window) => window.label === 'Included usage');
-        if (!unified || expected === null) assert.equal(included, undefined);
+        if (!unified || !monthly || expected === null) assert.equal(included, undefined);
         else assert.equal(included?.usedPercent, expected);
         const team = result.windows.find((window) => window.label === 'Team pool');
         assert.equal(team?.usedPercent, 75);
@@ -452,6 +475,7 @@ test('unified limits never reuse legacy overall or team usage as the included po
 test('probe keeps a unified account available when plan timestamps exceed the Date range', async () => {
   const result = await probe('tok', { httpsLib: dashboardFakeHttps({
     '/api/usage-summary': { individualUsage: { plan: { totalPercentUsed: 30 } } },
+    '/api/dashboard/get-sand-usage-status': { isUnified: true, usagePercent: 30 },
     '/api/dashboard/get-plan-info': {
       isMerged: true,
       planInfo: {
@@ -482,6 +506,7 @@ test('probe fetches the prepaid balance only for unified plans', async () => {
 
   const unified = await probe('tok', { httpsLib: dashboardFakeHttps({
     '/api/usage-summary': { individualUsage: { plan: { totalPercentUsed: 30 } } },
+    '/api/dashboard/get-sand-usage-status': { isUnified: true, usagePercent: 30 },
     '/api/dashboard/get-plan-info': {
       isMerged: true,
       planInfo: { planName: 'Plus', includedUsagePeriod: 'INCLUDED_USAGE_PERIOD_WEEKLY', includedUsageResetsAt: '1792800000000' }
@@ -578,13 +603,13 @@ test('an explicit current-period zero beats a nonzero sand percent', async () =>
   assert.equal(result.usage.planPercent, 0);
 });
 
-test('unified included usage keeps usage-summary when the period and sand percents are absent', async () => {
+test('weekly unified usage stays unknown without a period value or a valid unified sand value', async () => {
   const withoutAccessToken = await probe('tok', { httpsLib: dashboardFakeHttps({
     '/api/usage-summary': { individualUsage: { plan: { totalPercentUsed: 0, used: 0, limit: 4615 } } },
     '/api/dashboard/get-plan-info': { isMerged: true },
     '/api/dashboard/get-sand-usage-status': { isUnified: true }
   }) });
-  assert.equal(withoutAccessToken.usage.planPercent, 0);
+  assert.equal(withoutAccessToken.usage.planPercent, null);
 
   const sandNotUnified = await probe(UNIFIED_SESSION, { httpsLib: dashboardFakeHttps({
     '/api/usage-summary': { individualUsage: { plan: { totalPercentUsed: 30 } } },
@@ -592,7 +617,32 @@ test('unified included usage keeps usage-summary when the period and sand percen
     '/api/dashboard/get-sand-usage-status': { usagePercent: 80, isUnified: false },
     [PERIOD_USAGE_PATH]: null
   }) });
-  assert.equal(sandNotUnified.usage.planPercent, 30);
+  assert.equal(sandNotUnified.usage.planPercent, null);
+});
+
+test('weekly unified limits retain an explicit zero from current-period or unified sand', async () => {
+  for (const [period, sandPercent] of [
+    [{ planUsage: { totalPercentUsed: 0 } }, 13],
+    [{}, 0]
+  ]) {
+    const result = await fetchCursorLimits({}, {
+      readActiveAccount: () => ({ id: 'acct-1', sessionToken: UNIFIED_SESSION }),
+      httpsLib: dashboardFakeHttps({
+        '/api/usage-summary': { individualUsage: { plan: { totalPercentUsed: 30 } } },
+        '/api/dashboard/get-plan-info': { isMerged: true, planInfo: {
+          includedUsagePeriod: 'INCLUDED_USAGE_PERIOD_WEEKLY',
+          includedUsageResetsAt: '1792800000000'
+        } },
+        '/api/dashboard/get-sand-usage-status': { isUnified: true, usagePercent: sandPercent },
+        [PERIOD_USAGE_PATH]: period
+      })
+    });
+    assert.equal(result.status, 'ok');
+    const included = result.windows.find((window) => window.label === 'Included usage');
+    assert.equal(included?.usedPercent, 0);
+    assert.equal(included.kind, 'weekly');
+    assert.equal(included.resetsAt, new Date(1792800000000).toISOString());
+  }
 });
 
 test('legacy plans do not call current-period usage', async () => {
