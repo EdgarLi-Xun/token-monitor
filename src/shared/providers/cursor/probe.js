@@ -1,7 +1,7 @@
 'use strict';
 
 const https = require('node:https');
-const { abortError } = require('../../probeDeadline');
+const { abortError, runWithProbeDeadline } = require('../../probeDeadline');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 
 const USAGE_SUMMARY_URL = 'https://cursor.com/api/usage-summary';
@@ -361,12 +361,14 @@ async function probe(sessionToken, opts = {}) {
   let periodPercent = null;
   if (unifiedPlan) {
     const accessToken = sessionAccessToken(sessionToken);
+    const periodTimeoutMs = Math.min(configuredTimeoutMs, SAND_TIMEOUT_MS);
     const [prepaidResult, periodResult] = await Promise.all([
       dashboardRpc(PREPAID_BILLING_URL, sessionToken, opts, configuredTimeoutMs),
       accessToken
-        ? requestJson(CURRENT_PERIOD_USAGE_URL, sessionToken, {
+        ? runWithProbeDeadline(({ signal }) => requestJson(CURRENT_PERIOD_USAGE_URL, sessionToken, {
           ...opts,
-          timeoutMs: Math.min(configuredTimeoutMs, SAND_TIMEOUT_MS),
+          signal,
+          timeoutMs: periodTimeoutMs,
           method: 'POST',
           headers: {
             Accept: 'application/json',
@@ -375,7 +377,7 @@ async function probe(sessionToken, opts = {}) {
           },
           body: '{}',
           bearerToken: accessToken
-        })
+        }), { signal: opts.signal, deadlineMs: periodTimeoutMs }).catch(() => null)
         : Promise.resolve(null)
     ]);
     if (prepaidResult.ok) prepaid = parsePrepaidBilling(prepaidResult.json);

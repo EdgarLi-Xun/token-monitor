@@ -1,7 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { EventEmitter } = require('node:events');
+const { EventEmitter, getEventListeners } = require('node:events');
+const https = require('node:https');
 const test = require('node:test');
 const { fetchCursorLimits } = require('../../src/shared/providers/cursor/limits');
 
@@ -642,6 +643,111 @@ test('current-period timeout is capped and preserves fallback limits', async (t)
       assert.equal(result.windows.find((window) => window.label === 'Prepaid balance')?.remaining, 14.46);
       assert.equal(result.windows.find((window) => window.label === 'Team pool')?.usedPercent, 75);
       assert.equal(timeoutMs, scenario.expectedTimeout);
+    });
+  }
+});
+
+test('current-period deadline aborts a stalled DNS lookup and preserves fallback', async (t) => {
+  for (const scenario of [
+    { name: 'default deadline with sand usage', timeoutMs: undefined, deadlineMs: 5000, sandPercent: 13, period: 'WEEKLY', expectedPercent: 13 },
+    { name: 'shorter deadline with sand zero', timeoutMs: 2000, deadlineMs: 2000, sandPercent: 0, period: 'WEEKLY', expectedPercent: 0 },
+    { name: 'capped deadline with unknown weekly usage', timeoutMs: 20000, deadlineMs: 5000, period: 'WEEKLY', expectedPercent: null },
+    { name: 'default deadline with monthly summary', timeoutMs: undefined, deadlineMs: 5000, period: 'MONTHLY', expectedPercent: 30 }
+  ]) {
+    await t.test(scenario.name, async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const controller = new AbortController();
+      let request;
+      let lookupStarted;
+      const started = new Promise((resolve) => { lookupStarted = resolve; });
+      const pending = fetchCursorLimits({}, {
+        readActiveAccount: () => ({ id: 'acct-1', sessionToken: UNIFIED_SESSION }),
+        timeoutMs: scenario.timeoutMs,
+        signal: controller.signal,
+        httpsLib: {
+          request(opts, cb) {
+            if (opts.path === PERIOD_USAGE_PATH) {
+              // Real ClientRequest, with DNS deliberately never completing.
+              request = https.request({ ...opts, lookup() { lookupStarted(); } }, cb);
+              return request;
+            }
+            return dashboardFakeHttps({
+              '/api/usage-summary': { individualUsage: { plan: { totalPercentUsed: 30 } } },
+              '/api/dashboard/get-plan-info': { isMerged: true, planInfo: {
+                includedUsagePeriod: `INCLUDED_USAGE_PERIOD_${scenario.period}`
+              } },
+              '/api/dashboard/get-sand-usage-status': { isUnified: true, usagePercent: scenario.sandPercent },
+              '/api/dashboard/get-user-prepaid-billing': { availableCents: '1446' }
+            }).request(opts, cb);
+          }
+        }
+      });
+      try {
+        await started;
+        t.mock.timers.tick(scenario.deadlineMs - 1);
+        await new Promise(setImmediate);
+        assert.equal(request.destroyed, false);
+        t.mock.timers.tick(1);
+        await new Promise(setImmediate);
+        assert.equal(request.destroyed, true);
+        const result = await pending;
+        assert.equal(result.status, 'ok');
+        const included = result.windows.find((window) => window.label === 'Included usage');
+        if (scenario.expectedPercent === null) assert.equal(included, undefined);
+        else assert.equal(included?.usedPercent, scenario.expectedPercent);
+        assert.equal(result.windows.find((window) => window.label === 'Prepaid balance')?.remaining, 14.46);
+        assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+      } finally {
+        controller.abort(new Error('test cleanup'));
+        await pending;
+      }
+    });
+  }
+});
+
+test('current-period deadline cleans up after success and parent cancellation', async (t) => {
+  for (const cancel of [false, true]) {
+    await t.test(cancel ? 'parent cancellation' : 'successful response', async (t) => {
+      const setTimer = global.setTimeout;
+      const clearTimer = global.clearTimeout;
+      const timers = [];
+      const cleared = [];
+      t.mock.method(global, 'setTimeout', (callback, ms) => {
+        const timer = setTimer(callback, ms);
+        timers.push({ timer, ms });
+        return timer;
+      });
+      t.mock.method(global, 'clearTimeout', (timer) => { cleared.push(timer); clearTimer(timer); });
+      const controller = new AbortController();
+      const reason = new Error('parent stopped');
+      let destroyedWith = null;
+      const result = await probe(UNIFIED_SESSION, {
+        signal: controller.signal,
+        httpsLib: {
+          request(opts, cb) {
+            if (cancel && opts.path === PERIOD_USAGE_PATH) {
+              const req = new EventEmitter();
+              req.write = () => {};
+              req.setTimeout = () => {};
+              req.destroy = (error) => { destroyedWith = error; req.emit('error', error); };
+              req.end = () => setImmediate(() => controller.abort(reason));
+              return req;
+            }
+            return dashboardFakeHttps({
+              '/api/dashboard/get-plan-info': { isMerged: true },
+              '/api/dashboard/get-sand-usage-status': { isUnified: true, usagePercent: 13 },
+              [PERIOD_USAGE_PATH]: { planUsage: { totalPercentUsed: 0 } }
+            }).request(opts, cb);
+          }
+        }
+      });
+      assert.equal(result.ok, true);
+      assert.equal(result.usage.planPercent, cancel ? 13 : 0);
+      assert.equal(destroyedWith, cancel ? reason : null);
+      assert.equal(timers.length, 1);
+      assert.equal(timers[0].ms, 5000);
+      assert.deepEqual(cleared, [timers[0].timer]);
+      assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
     });
   }
 });

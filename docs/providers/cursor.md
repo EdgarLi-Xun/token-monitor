@@ -49,7 +49,7 @@ Unified plans (The X Subscription: Plus, Premium, Super and unified Ultra) are d
 
 Account-scoped enable/disable affects limits collection only. The active tokscale account and self-synced history are managed by the explicit Cursor lifecycle operations.
 
-The best-effort current-period RPC uses the same socket timeout cap as the dashboard RPCs: at most five seconds, while preserving a shorter configured timeout. On timeout, normal percentage fallback still applies; this cap is not a wall-clock deadline for the entire account probe.
+The best-effort current-period RPC has a wall-clock deadline of at most five seconds, preserving a shorter configured timeout. This covers DNS, connection setup and response reads, destroys the request on expiry, and retains parent cancellation. The deadline timer and parent listener are cleaned up when the call settles. On timeout, normal percentage fallback still applies; this is a deadline for this RPC, not for the entire account probe.
 
 ## Verification
 
