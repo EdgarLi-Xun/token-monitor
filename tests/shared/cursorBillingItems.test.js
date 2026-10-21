@@ -1,0 +1,92 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const { emptyPeriod } = require('../../src/shared/usage');
+const { nextPageToken, rowsFromBillingPayload, supplementCursorBilling } = require('../../src/shared/providers/cursor/billingItems');
+
+const NOW = new Date(2026, 9, 20, 15, 0, 0);
+
+function item(overrides = {}) {
+  return {
+    id: 'item-1',
+    eventTime: '2026-10-20T04:56:13.809Z',
+    product: 'cursor',
+    usageType: 'included',
+    model: 'grok-4.7-high',
+    usage: {
+      'prompt-text-tokens': '10',
+      'cached-prompt-text-tokens': '20',
+      'cache-write-text-tokens': '0',
+      'completion-text-tokens': '5'
+    },
+    ...overrides
+  };
+}
+
+test('billing items keep cursor token rows and drop other products', () => {
+  const rows = rowsFromBillingPayload({
+    items: [
+      item(),
+      item({ id: 'bot', product: 'grok-bot', model: '' }),
+      item({ id: 'chat', product: 'grok-chat', model: 'grok-4.7', usage: { 'prompt-text-tokens': '9' } }),
+      item({ id: 'empty', usage: { 'prompt-text-tokens': '0' } })
+    ]
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].model, 'grok-4.7-high');
+  assert.equal(rows[0].inputTokens, 10);
+  assert.equal(rows[0].cacheReadTokens, 20);
+  assert.equal(rows[0].outputTokens, 5);
+  assert.equal(rows[0].totalTokens, 35);
+});
+
+test('auto billing items use the cursor auto model name', () => {
+  const rows = rowsFromBillingPayload({ items: [item({ model: 'auto', id: 'auto' })] });
+  assert.equal(rows[0].model, 'cursor-auto');
+});
+
+test('Grok dashboard response reads displayExtras.model and nested cursor pagination', () => {
+  const payload = {
+    data: [{
+      ...item({ id: undefined, model: undefined }),
+      billingItemId: 'billing-1', displayExtras: { model: 'grok-4.7-high', userEmail: 'not-stored@example.test' }
+    }],
+    pagination: { hasMore: true, nextCursor: 'next-page' }
+  };
+  assert.equal(rowsFromBillingPayload(payload).length, 1);
+  assert.equal(rowsFromBillingPayload(payload)[0].model, 'grok-4.7-high');
+  assert.equal(nextPageToken(payload), 'next-page');
+  assert.equal(nextPageToken({ pagination: { hasMore: false, nextCursor: 'unused' } }), '');
+  assert.doesNotMatch(JSON.stringify(rowsFromBillingPayload(payload)), /not-stored/);
+});
+
+test('anchor mode adds only today onto the fresh cursor partition', () => {
+  const older = item({ id: 'older', eventTime: '2026-10-15T02:00:00.000Z' });
+  const next = supplementCursorBilling({
+    mode: 'anchor',
+    today: emptyPeriod(),
+    month: emptyPeriod(),
+    allTime: emptyPeriod(),
+    todayPartitions: {}
+  }, rowsFromBillingPayload({ items: [item(), older] }), NOW);
+  assert.equal(next.todayPartitions.cursor.clients.cursor, 35);
+  assert.equal(next.todayPartitions.cursor.models['grok-4.7-high'], 35);
+  assert.equal(next.month.totalTokens, 0);
+});
+
+test('a full scan adds today, the month, and the whole billing gap', () => {
+  const older = item({ id: 'older', eventTime: '2026-10-15T02:00:00.000Z', usage: { 'prompt-text-tokens': '4' } });
+  const next = supplementCursorBilling({
+    mode: 'full',
+    today: emptyPeriod(),
+    month: emptyPeriod(),
+    allTime: emptyPeriod(),
+    todayPartitions: {}
+  }, rowsFromBillingPayload({ items: [item(), older] }), NOW);
+  assert.equal(next.today.clients.cursor, 35);
+  assert.equal(next.month.clients.cursor, 39);
+  assert.equal(next.allTime.models['grok-4.7-high'], 39);
+  assert.equal(next.today.costUsd, 0);
+});

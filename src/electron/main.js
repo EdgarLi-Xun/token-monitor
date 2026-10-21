@@ -25,6 +25,7 @@ const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
 const tokenNumberAnimationApi = require('./tokenNumberAnimation');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
+const { billingItemsPath, openGrokDashboardWindow, refreshGrokBillingItems, startGrokBillingRefresh } = require('./grokDashboardBilling');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
 const { createMimoExchangeFetch } = require('./providers/mimo/exchangeFetch');
@@ -834,6 +835,7 @@ function syncUploadIntervalMs() {
 
 function electronUsageConfig(errorPrefix) {
   return usageConfigFromSettings(settings, {
+    cursorBillingItemsPath: billingItemsPath(app.getPath('userData')),
     agentVersion: appVersion(),
     agentRuntime: 'electron-widget',
     commandTimeoutMs: 120 * 1000,
@@ -6790,6 +6792,13 @@ async function fetchStats(options = {}) {
     const refreshUsage = options?.forceUsage === true
       || options?.forceHistory === true
       || options?.forceSelfSync === true;
+    if (options.forceSelfSync && clientsCsvForSetting(settings.clients).split(',').includes('cursor')) {
+      try {
+        await refreshGrokBillingItems({ session, userDataPath: app.getPath('userData'), todayOnly: true });
+      } catch (error) {
+        console.log(`[grok-dashboard] manual refresh failed: ${error.message}`);
+      }
+    }
     await runManualDeviceRefresh(deviceRuntimeHandle, {
       refreshUsage,
       forceHistory: Boolean(options?.forceHistory),
@@ -7742,6 +7751,23 @@ app.whenReady().then(() => {
   });
   applyMacActivationPolicy();
   createWindow();
+  const grokDashboardLogger = (message) => console.log(`[grok-dashboard] ${message}`);
+  const refreshCursorBillingUsage = () => deviceRuntimeHandle?.tick('cursor-billing', { forceHistory: true, todayOnly: true });
+  openGrokDashboardWindow({
+    BrowserWindow,
+    session,
+    userDataPath: app.getPath('userData'),
+    logger: grokDashboardLogger,
+    onRefresh: refreshCursorBillingUsage
+  });
+  const stopGrokBillingRefresh = startGrokBillingRefresh({
+    session,
+    userDataPath: app.getPath('userData'),
+    logger: grokDashboardLogger,
+    isEnabled: () => ownsUsageRuntime() && clientsCsvForSetting(settings.clients).split(',').includes('cursor'),
+    onRefresh: refreshCursorBillingUsage
+  });
+  app.once('before-quit', stopGrokBillingRefresh);
   syncLoginItemSettingFromOs();
   configureWindowToggleShortcut();
   // The retired in-app npm updater kept upstream tokscale builds here; the

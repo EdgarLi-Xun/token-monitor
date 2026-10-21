@@ -46,6 +46,8 @@ const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers
 const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
+const { newestCursorUsageEventMs } = require('./providers/cursor/usageEvents');
+const { billingHistoryGraph, supplementCursorBilling } = require('./providers/cursor/billingItems');
 const { cursorDesktopWatchRoots, isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
 const {
   applySessionMetadata,
@@ -831,8 +833,10 @@ async function collectHistoryOnce(options) {
     // A failed native scan without retained history is no update, not a new
     // Dots-only replacement for the device's last successful full history.
     if (!history && failureCode === 'history-graph-failed') return null;
-    return options.codexLocalGraph
-      ? mergeHistories([history, normalizeHistory(parseGraphResult(options.codexLocalGraph), { capDays, todayKey })].filter(Boolean), { capDays, todayKey })
+    const supplements = [options.codexLocalGraph, options.cursorBillingGraph]
+      .filter(Boolean).map(graph => normalizeHistory(parseGraphResult(graph), { capDays, todayKey }));
+    return supplements.length
+      ? mergeHistories([history, ...supplements].filter(Boolean), { capDays, todayKey })
       : history;
   };
   if (options.dailyHistoryArchiveEnabled) {
@@ -862,6 +866,19 @@ async function collectHistoryOnce(options) {
   const result = liveHistory.daily.length || liveHistory.monthly.length ? liveHistory : null;
   reportStatus(failureCode === null);
   return withLocalHistory(result);
+}
+
+function loadCursorBillingRows(options) {
+  const filePath = options.cursorBillingItemsPath;
+  if (!filePath) return [];
+  let stored;
+  try { stored = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) { return []; }
+  const rows = Array.isArray(stored?.rows) ? stored.rows : [];
+  const afterMs = newestCursorUsageEventMs({ homeDir: options.homeDir, env: options.env });
+  const nowMs = collectionDate(options.now).getTime();
+  const sinceMs = Date.parse(options.allTimeSince || '') || 0;
+  return rows.filter((row) => row && row.model && Number(row.eventTime) > afterMs
+    && Number(row.eventTime) >= sinceMs && Number(row.eventTime) <= nowMs && Number(row.totalTokens) > 0);
 }
 
 function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, enabled = true) {
@@ -1214,6 +1231,20 @@ async function collectUsageOnce(options) {
     }
   }
 
+  // Billing is an independent ledger. Re-project it on every tick, including
+  // other clients' watch ticks and late historical backfills, without putting
+  // it in native delta anchors or generic history retention.
+  const cursorBillingRows = trackedClientSet.has('cursor') ? loadCursorBillingRows({ ...options, now: collectedAt }) : [];
+  const cursorBillingView = supplementCursorBilling({
+    mode: 'full', today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod()
+  }, cursorBillingRows, collectedAt);
+  if (cursorBillingRows.length) {
+    today = mergePeriods(today, cursorBillingView.today);
+    month = mergePeriods(month, cursorBillingView.month);
+    allTime = mergePeriods(allTime, cursorBillingView.allTime);
+  }
+  options.onCursorBillingComputed?.(cursorBillingView);
+
   // This contribution is durable but has no rollout file. Keep it outside
   // windowsPeriods/todayPartitions so exact native watch deltas stay native.
   let codexLocalView = null;
@@ -1300,6 +1331,17 @@ async function collectUsageOnce(options) {
       summary.nativeProjects = empty.projects;
     }
   }
+  if (trackedClientSet.has('cursor') && options.cursorBillingItemsPath) {
+    const cursorView = require('./providers/cursor/localSessions').readCursorLocalSessions({
+      homeDir: options.homeDir, env: options.env, platform: platformValue, now: collectedAt,
+      allTimeSince, projectsEnabled, projectIdentity, billingRows: cursorBillingRows,
+      periods: { today, month, allTime }
+    });
+    for (const [field, values] of [['nativeSessions', cursorView.sessions], ['nativeProjects', cursorView.projects]]) {
+      summary[field] = Object.fromEntries(['today', 'month', 'allTime'].map(name =>
+        [name, { ...summary[field]?.[name], ...values[name] }]));
+    }
+  }
   if (typeof options.onAnchorComputed === 'function') {
     // Reuse the existing catalog-title ledger (historically named t3Titles)
     // for summary overrides too. Provenance never enters published rows.
@@ -1339,6 +1381,7 @@ async function collectUsageOnce(options) {
     const history = await collectHistoryOnce({
       clients: normalizedClients,
       codexLocalGraph: codexLocalView?.graph || null,
+      cursorBillingGraph: cursorBillingRows.length ? billingHistoryGraph(cursorBillingRows) : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -2869,6 +2912,7 @@ function startCollector(options) {
     try {
       let captured = null;
       let tickLocalView = null;
+      let tickCursorBillingView = null;
       let catpawSourceChangeObserved = false;
       const summary = await collectUsageOnce({
         ...options,
@@ -2909,6 +2953,7 @@ function startCollector(options) {
           codexLocalViewDay = todayKey;
           tickLocalView = view;
         },
+        onCursorBillingComputed: (view) => { tickCursorBillingView = view; },
         // Both selections name clients whose pending source event this tick has
         // already consumed — the queue's drain for one, its acknowledgement for
         // the other — so either is a legitimate restore.
@@ -3120,9 +3165,12 @@ function startCollector(options) {
           const visibleDateKey = Number.isFinite(visibleDate.getTime())
             ? localTodayKey(visibleDate)
             : todayKey;
-          const retainedToday = tickLocalView?.sessionKeys?.length
+          let retainedToday = tickLocalView?.sessionKeys?.length
             ? applyPeriodDelta(visibleSummary.today, emptyPeriod(), tickLocalView.today)
             : visibleSummary.today;
+          if (tickCursorBillingView?.today.totalTokens) {
+            retainedToday = applyPeriodDelta(retainedToday, emptyPeriod(), tickCursorBillingView.today);
+          }
           const retainedLive = retainLiveDailyHistory(retainedToday, {
             ...(options.dailyHistoryArchiveOptions || {}),
             liveDays: liveDailyHistoryDays,

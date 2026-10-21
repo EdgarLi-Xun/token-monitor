@@ -121,7 +121,8 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     watchDebounceMs: Number(context.watchDebounceMs || 1500),
     wslScanEnabled: settings.wslScanEnabled !== false,
     onError: context.onError,
-    logger: context.logger
+    logger: context.logger,
+    cursorBillingItemsPath: context.cursorBillingItemsPath
   };
 }
 
