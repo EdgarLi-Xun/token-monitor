@@ -7,11 +7,16 @@ const { emptyPeriod } = require('../../src/shared/usage');
 const { nextPageToken, rowsFromBillingPayload, supplementCursorBilling } = require('../../src/shared/providers/cursor/billingItems');
 
 const NOW = new Date(2026, 9, 20, 15, 0, 0);
+// Period windows cut at local midnight. Pin fixtures to that calendar, not a
+// UTC instant that CI's timezone matrix can shift onto yesterday.
+function localEventTime(year, month, day, hour = 4, minute = 56, second = 13) {
+  return new Date(year, month, day, hour, minute, second, 809).toISOString();
+}
 
 function item(overrides = {}) {
   return {
     id: 'item-1',
-    eventTime: '2026-10-20T04:56:13.809Z',
+    eventTime: localEventTime(2026, 9, 20),
     product: 'cursor',
     usageType: 'included',
     model: 'grok-4.7-high',
@@ -63,7 +68,7 @@ test('Grok dashboard response reads displayExtras.model and nested cursor pagina
 });
 
 test('anchor mode adds only today onto the fresh cursor partition', () => {
-  const older = item({ id: 'older', eventTime: '2026-10-15T02:00:00.000Z' });
+  const older = item({ id: 'older', eventTime: localEventTime(2026, 9, 15, 2, 0, 0) });
   const next = supplementCursorBilling({
     mode: 'anchor',
     today: emptyPeriod(),
@@ -77,7 +82,7 @@ test('anchor mode adds only today onto the fresh cursor partition', () => {
 });
 
 test('a full scan adds today, the month, and the whole billing gap', () => {
-  const older = item({ id: 'older', eventTime: '2026-10-15T02:00:00.000Z', usage: { 'prompt-text-tokens': '4' } });
+  const older = item({ id: 'older', eventTime: localEventTime(2026, 9, 15, 2, 0, 0), usage: { 'prompt-text-tokens': '4' } });
   const next = supplementCursorBilling({
     mode: 'full',
     today: emptyPeriod(),
