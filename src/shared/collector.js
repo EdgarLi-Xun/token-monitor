@@ -1235,9 +1235,21 @@ async function collectUsageOnce(options) {
   // other clients' watch ticks and late historical backfills, without putting
   // it in native delta anchors or generic history retention.
   const cursorBillingRows = trackedClientSet.has('cursor') ? loadCursorBillingRows({ ...options, now: collectedAt }) : [];
+  let cursorBillingPricing = {};
+  if (cursorBillingRows.length) {
+    try {
+      cursorBillingPricing = await resolveLocalUsagePricing(cursorBillingRows, {
+        lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+        commandTimeoutMs: options.pricingTimeoutMs,
+        pricingRevision: options.pricingRevision ?? pricingFingerprint(options)
+      });
+    } catch (_) {
+      // Catalog failures leave the ledger unpriced rather than blocking usage.
+    }
+  }
   const cursorBillingView = supplementCursorBilling({
     mode: 'full', today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod()
-  }, cursorBillingRows, collectedAt);
+  }, cursorBillingRows, collectedAt, cursorBillingPricing);
   if (cursorBillingRows.length) {
     today = mergePeriods(today, cursorBillingView.today);
     month = mergePeriods(month, cursorBillingView.month);
@@ -1381,7 +1393,7 @@ async function collectUsageOnce(options) {
     const history = await collectHistoryOnce({
       clients: normalizedClients,
       codexLocalGraph: codexLocalView?.graph || null,
-      cursorBillingGraph: cursorBillingRows.length ? billingHistoryGraph(cursorBillingRows) : null,
+      cursorBillingGraph: cursorBillingRows.length ? billingHistoryGraph(cursorBillingRows, cursorBillingPricing) : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,

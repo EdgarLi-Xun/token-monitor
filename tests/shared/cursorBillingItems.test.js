@@ -89,4 +89,25 @@ test('a full scan adds today, the month, and the whole billing gap', () => {
   assert.equal(next.month.clients.cursor, 39);
   assert.equal(next.allTime.models['grok-4.7-high'], 39);
   assert.equal(next.today.costUsd, 0);
+  assert.equal(next.today.unpricedTokens, 35);
+});
+
+test('catalog rates estimate included billing instead of billed zero', () => {
+  const pricingByModel = {
+    'grok-4.7-high': {
+      inputCostPerToken: 0.000002,
+      outputCostPerToken: 0.000006,
+      cacheReadInputTokenCost: 0.0000005
+    }
+  };
+  const next = supplementCursorBilling({
+    mode: 'full',
+    today: emptyPeriod(),
+    month: emptyPeriod(),
+    allTime: emptyPeriod(),
+    todayPartitions: {}
+  }, rowsFromBillingPayload({ items: [item()] }), NOW, pricingByModel);
+  assert.equal(next.today.costUsd, 10 * 0.000002 + 20 * 0.0000005 + 5 * 0.000006);
+  assert.equal(next.today.unpricedTokens || 0, 0);
+  assert.equal(next.today.modelCosts['grok-4.7-high'], next.today.costUsd);
 });

@@ -87,17 +87,47 @@ function rowsInRange(rows, startMs, endMs) {
   return rows.filter((row) => row.eventTime >= startMs && row.eventTime < endMs);
 }
 
-function periodFromBillingRows(rows) {
-  if (!rows.length) return null;
-  const period = extractUsageFromTokscale(rows.map((row) => ({
+// Same catalog-rate estimate native Cursor rows get from tokscale. Included
+// billed $0 stays off the headline; missing rates stay unpriced, not $0.
+function estimatedCost(usage, pricing) {
+  if (!pricing) return { cost: 0, unpricedTokens: usage.total || 0 };
+  let cost = 0;
+  let unpricedTokens = 0;
+  for (const [field, rate] of [
+    ['input', 'inputCostPerToken'], ['cacheRead', 'cacheReadInputTokenCost'],
+    ['cacheWrite', 'cacheCreationInputTokenCost'], ['output', 'outputCostPerToken']
+  ]) {
+    if (!usage[field]) continue;
+    if (!Number.isFinite(pricing[rate]) || pricing[rate] < 0) unpricedTokens += usage[field];
+    else cost += usage[field] * pricing[rate];
+  }
+  return { cost, unpricedTokens };
+}
+
+function pricedBillingEntry(row, pricingByModel) {
+  const estimate = estimatedCost({
+    input: row.inputTokens,
+    cacheRead: row.cacheReadTokens,
+    cacheWrite: row.cacheWriteTokens,
+    output: row.outputTokens,
+    total: row.totalTokens
+  }, pricingByModel?.[String(row.model || '').toLowerCase()] || null);
+  return {
     client: 'cursor',
     model: row.model,
     totalTokens: row.totalTokens,
     inputTokens: row.inputTokens,
     outputTokens: row.outputTokens,
     cacheReadTokens: row.cacheReadTokens,
-    cacheWriteTokens: row.cacheWriteTokens
-  })));
+    cacheWriteTokens: row.cacheWriteTokens,
+    cost: estimate.cost,
+    ...(estimate.unpricedTokens > 0 ? { unpricedTokens: estimate.unpricedTokens } : {})
+  };
+}
+
+function periodFromBillingRows(rows, pricingByModel) {
+  if (!rows.length) return null;
+  const period = extractUsageFromTokscale(rows.map((row) => pricedBillingEntry(row, pricingByModel)));
   return period.totalTokens > 0 ? period : null;
 }
 
@@ -114,32 +144,37 @@ function startOfLocalMonth(date) {
   return copy.getTime();
 }
 
-function billingHistoryGraph(rows) {
+function billingHistoryGraph(rows, pricingByModel) {
   const days = new Map();
   for (const row of rows) {
     const date = localDayKey(new Date(row.eventTime));
     if (!days.has(date)) days.set(date, { date, clients: [] });
+    const estimate = estimatedCost({
+      input: row.inputTokens, cacheRead: row.cacheReadTokens,
+      cacheWrite: row.cacheWriteTokens, output: row.outputTokens, total: row.totalTokens
+    }, pricingByModel?.[String(row.model || '').toLowerCase()] || null);
     days.get(date).clients.push({
-      client: 'cursor', modelId: row.model, cost: 0, messages: 1,
+      client: 'cursor', modelId: row.model, cost: estimate.cost, messages: 1,
+      ...(estimate.unpricedTokens > 0 ? { unpricedTokens: estimate.unpricedTokens } : {}),
       tokens: { input: row.inputTokens, output: row.outputTokens, cacheRead: row.cacheReadTokens, cacheWrite: row.cacheWriteTokens }
     });
   }
   return { contributions: [...days.values()] };
 }
 
-function supplementCursorBilling(state, rows, now) {
+function supplementCursorBilling(state, rows, now, pricingByModel) {
   const todayStart = startOfLocalDay(now);
   const tomorrow = new Date(todayStart);
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const todayExtra = periodFromBillingRows(rowsInRange(rows, todayStart, tomorrow.getTime()));
+  const todayExtra = periodFromBillingRows(rowsInRange(rows, todayStart, tomorrow.getTime()), pricingByModel);
   if (state.mode === 'anchor') {
     if (!todayExtra) return state;
     const todayPartitions = { ...(state.todayPartitions || {}) };
     todayPartitions.cursor = mergePeriods(todayPartitions.cursor, todayExtra);
     return { ...state, todayPartitions };
   }
-  const monthExtra = periodFromBillingRows(rowsInRange(rows, startOfLocalMonth(now), Number.POSITIVE_INFINITY));
-  const allExtra = periodFromBillingRows(rows);
+  const monthExtra = periodFromBillingRows(rowsInRange(rows, startOfLocalMonth(now), Number.POSITIVE_INFINITY), pricingByModel);
+  const allExtra = periodFromBillingRows(rows, pricingByModel);
   if (!todayExtra && !monthExtra && !allExtra) return state;
   return {
     ...state,

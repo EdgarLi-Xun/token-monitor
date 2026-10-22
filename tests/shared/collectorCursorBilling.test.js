@@ -25,7 +25,9 @@ test('Cursor local session and project detail is attached without changing billi
     model: row.model, inputTokens: 10, outputTokens: 5, cacheReadTokens: 20, cacheWriteTokens: 0, totalTokens: 35 }] }));
   const options = { clients: 'cursor', deviceId: 'test', homeDir: dir, env: {}, platform: 'linux', now,
     osInfo: {}, wslScanEnabled: false, projectsEnabled: true, includeHistory: false,
-    cursorBillingItemsPath: billingPath, runTokscale: async () => ({ entries: [] }) };
+    cursorBillingItemsPath: billingPath, runTokscale: async () => ({ entries: [] }),
+    pricingRevision: 'cursor-detail-pricing',
+    lookupModelPricing: async () => ({ pricing: { inputCostPerToken: 0.000002, outputCostPerToken: 0.000006, cacheReadInputTokenCost: 5e-7 } }) };
   const result = await collectUsageOnce(options);
   assert.equal(result.today.clients.cursor, 35);
   assert.equal(result.today.sessions['cursor:conversation'], undefined);
@@ -52,11 +54,14 @@ test('Cursor billing fills periods and history while native anchors stay free of
     allTimeSince: '2026-01-01', osInfo: {}, wslScanEnabled: false, projectsEnabled: false,
     codexLocalUsageEnabled: false, includeHistory: true, cursorBillingItemsPath: billingPath,
     runTokscale: async () => ({ entries: [] }), runGraph: async () => ({ contributions: [] }),
+    pricingRevision: 'cursor-billing-pricing',
+    lookupModelPricing: async () => ({ pricing: { inputCostPerToken: 0.000002 } }),
     dailyHistoryArchiveEnabled: true, dailyHistoryArchiveOptions: { path: path.join(dir, 'history.json') }
   };
   let captured;
   const first = await collectUsageOnce({ ...options, onAnchorComputed: value => { captured = value; } });
   assert.equal(first.today.clients.cursor, 10);
+  assert.equal(Number(first.today.costUsd.toFixed(8)), 0.00002);
   assert.equal(first.month.clients.cursor, 30);
   assert.equal(first.allTime.clients.cursor, 30);
   assert.equal(first.history?.summary.totalTokens, 30);
