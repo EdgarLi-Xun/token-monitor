@@ -885,6 +885,26 @@ function loadCursorBillingRows(options) {
   return rows.filter((row) => row.eventTime >= sinceMs && row.eventTime <= nowMs);
 }
 
+function mergeNativeProjectDetails(existing = {}, incoming = {}) {
+  const projects = { ...existing };
+  for (const [id, project] of Object.entries(incoming)) {
+    const previous = projects[id];
+    if (!previous) { projects[id] = project; continue; }
+    const sumCounts = field => {
+      const counts = Object.assign(Object.create(null), previous[field]);
+      for (const [key, value] of Object.entries(project[field] || {})) {
+        counts[key] = (Number(counts[key]) || 0) + (Number(value) || 0);
+      }
+      return counts;
+    };
+    projects[id] = { ...previous, ...project,
+      tokens: (Number(previous.tokens) || 0) + (Number(project.tokens) || 0),
+      clients: sumCounts('clients'), models: sumCounts('models'),
+      tokenDataUnavailable: previous.tokenDataUnavailable === true || project.tokenDataUnavailable === true };
+  }
+  return projects;
+}
+
 function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, enabled = true) {
   if (enabled === false) return false;
   if (force) return true;
@@ -1367,7 +1387,9 @@ async function collectUsageOnce(options) {
     });
     for (const [field, values] of [['nativeSessions', cursorView.sessions], ['nativeProjects', cursorView.projects]]) {
       summary[field] = Object.fromEntries(['today', 'month', 'allTime'].map(name =>
-        [name, { ...summary[field]?.[name], ...values[name] }]));
+        [name, field === 'nativeProjects'
+          ? mergeNativeProjectDetails(summary[field]?.[name], values[name])
+          : { ...summary[field]?.[name], ...values[name] }]));
     }
   }
   if (typeof options.onAnchorComputed === 'function') {

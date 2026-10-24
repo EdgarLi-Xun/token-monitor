@@ -36,6 +36,28 @@ test('Cursor local session and project detail is attached without changing billi
   assert.equal(result.today.sessions['cursor:conversation'], undefined);
   assert.equal(result.nativeSessions?.today['cursor:conversation']?.totalTokens, 35);
   assert.equal(Object.values(result.nativeProjects.today)[0].tokens, 35);
+  const project = Object.values(result.nativeProjects.today)[0];
+  for (const billingRows of [JSON.parse(fs.readFileSync(billingPath)).rows, []]) {
+    fs.writeFileSync(billingPath, JSON.stringify(ledger(billingRows)));
+    const nativeProjects = Object.fromEntries(['today', 'month', 'allTime'].map(name => [name, {
+      [project.projectId]: { ...project, tokens: 50, clients: { reasonix: 50 },
+        models: { 'claude-sonnet-4': 50 } }
+    }]));
+    const combined = await collectUsageOnce({ ...options, clients: 'cursor,reasonix',
+      reasonixNativeSessionsEnabled: true, reasonixNativeSessionCache: { getView: () => ({
+        sessions: { today: {}, month: {}, allTime: {} }, projects: nativeProjects
+      }) } });
+    for (const name of ['today', 'month', 'allTime']) {
+      const merged = combined.nativeProjects[name][project.projectId];
+      assert.equal(merged.tokens, billingRows.length ? 85 : 50, 'Cursor details must retain the other tool subtotal');
+      assert.equal(merged.clients.reasonix, 50);
+      assert.equal(merged.clients.cursor || 0, billingRows.length ? 35 : 0);
+      assert.equal(merged.models['claude-sonnet-4'], 50);
+      assert.equal(combined[name].clients.cursor || 0, billingRows.length ? 35 : 0,
+        'local project details must not add accounting');
+      assert.equal(nativeProjects[name][project.projectId].tokens, 50, 'the other provider snapshot stays immutable');
+    }
+  }
   const disabled = await collectUsageOnce({ ...options, clients: 'claude' });
   assert.equal(disabled.nativeSessions?.today['cursor:conversation'], undefined);
 });
