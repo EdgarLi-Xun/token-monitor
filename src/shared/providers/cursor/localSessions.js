@@ -6,6 +6,7 @@ const path = require('node:path');
 const { cursorDesktopStateCandidates } = require('./desktopState');
 const { resolveSessionMetadata } = require('./sessionMetadata');
 const { normalizeTokscaleModelNameForClient } = require('../../history');
+const { billingIdentityHash } = require('./billingLedger');
 
 const logCache = new Map();
 const tokenKeys = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'];
@@ -31,6 +32,7 @@ function parseHookLog(source) {
     const counters = [input.input_tokens, input.output_tokens, input.cache_read_tokens, input.cache_write_tokens];
     const valid = counters.every(value => Number.isSafeInteger(value) && value >= 0);
     rows.push({ time, sessionId, requestId, projectPath,
+      accountHash: billingIdentityHash(input.user_email),
       event: input.hook_event_name,
       model: normalizeTokscaleModelNameForClient(input.model || input.model_id || '', 'cursor'),
       ...(valid ? { counters } : {}) });
@@ -105,11 +107,13 @@ function matchBilling(turns, rows) {
   for (const turn of turns) {
     const counters = turn.stop?.counters;
     if (!turn.start || !counters || turn.to < turn.from || !turn.row.model) continue;
+    if (rows.some(row => row.billingAccountId) && (!turn.start.accountHash || turn.start.accountHash !== turn.stop.accountHash)) continue;
     // This pairing requires both token evidence and a unique local turn. A
     // nearby timestamp by itself is never enough to assign account billing.
     if (turns.some(other => other !== turn && other.row.sessionId !== turn.row.sessionId
       && other.row.model === turn.row.model && other.from <= turn.to && other.to >= turn.from)) continue;
-    const candidates = rows.filter(row => row.model === turn.row.model && row.eventTime >= turn.from && row.eventTime <= turn.to);
+    const candidates = rows.filter(row => row.model === turn.row.model && row.eventTime >= turn.from && row.eventTime <= turn.to
+      && (!row.billingAccountId || (turn.row.accountHash && row.billingEmailHash === turn.row.accountHash)));
     if (!candidates.length) continue;
     const totals = tokenKeys.map(key => candidates.reduce((sum, row) => sum + Number(row[key] || 0), 0));
     // Cursor's turn input counter includes cache hits. The dashboard splits

@@ -37,7 +37,7 @@ function fixture() {
     settings: { hubMode: 'local', clients: 'codex', limitsEnabled: false, limitProviders: [] },
     clientsCsvForSetting,
     session: {},
-    refreshGrokBillingItems: () => assert.fail('disabled Cursor must not fetch billing'),
+    refreshCursorBillingAccounts: () => assert.fail('disabled Cursor must not fetch billing'),
     mode: 'local',
     localStats: { updatedAt: '2026-10-07T00:00:00Z' },
     currentHubStatsIdentity: () => 'local',
@@ -86,7 +86,7 @@ test('manual refresh waits for current Cursor billing before collecting usage', 
   const { context, usage, calls } = fixture();
   const billing = deferred();
   context.settings.clients = 'cursor,codex';
-  context.refreshGrokBillingItems = options => {
+  context.refreshCursorBillingAccounts = options => {
     assert.equal(options.todayOnly, true);
     calls.push(['billing']);
     return billing.promise;
@@ -103,7 +103,7 @@ test('manual refresh waits for current Cursor billing before collecting usage', 
 test('unavailable Cursor billing does not block manual collection of other tools', async () => {
   const { context, usage, calls } = fixture();
   context.settings.clients = 'cursor,codex';
-  context.refreshGrokBillingItems = async () => { calls.push(['billing']); throw new Error('Grok billing items HTTP 403'); };
+  context.refreshCursorBillingAccounts = async () => { calls.push(['billing']); throw new Error('Grok billing items HTTP 403'); };
   const refresh = context.refreshManualStats();
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(calls.map(call => call[0]), ['billing', 'limits', 'usage']);

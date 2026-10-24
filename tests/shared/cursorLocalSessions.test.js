@@ -5,8 +5,11 @@ const test = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
+const cursorAuth = require('../../src/shared/providers/cursor/auth');
 const { parseHookLog, readCursorLocalSessions } = require('../../src/shared/providers/cursor/localSessions');
 const { projectIdentity } = require('../../src/shared/sessionMetadata');
+const { cursorDesktopStateCandidates } = require('../../src/shared/providers/cursor/desktopState');
 
 const now = new Date(2026, 9, 21, 12);
 const start = new Date(2026, 9, 21, 9).getTime();
@@ -20,13 +23,24 @@ function block(time, row) {
 const bill = { id: 'bill', model: 'grok-4.7-high', eventTime: start + 1500,
   inputTokens: 10, outputTokens: 5, cacheReadTokens: 20, cacheWriteTokens: 0, totalTokens: 35 };
 
-function fixture(t) {
+function fixture(t, platform = 'linux') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-local-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const log = path.join(dir, '.config/Cursor/logs/20261021T090000/window1/output_090000/cursor.hooks.log');
+  const state = cursorDesktopStateCandidates({ home: dir, platform, env: {} })[0];
+  const log = path.join(path.resolve(path.dirname(state), '../../logs'), '20261021T090000/window1/output_090000/cursor.hooks.log');
   fs.mkdirSync(path.dirname(log), { recursive: true });
-  return { log, options: { homeDir: dir, platform: 'linux', env: {}, now, projectIdentity,
+  return { log, options: { homeDir: dir, platform, env: {}, now, projectIdentity,
     billingRows: [bill], cache: new Map(), metadata: new Map([['conversation', { title: 'Real title' }]]) } };
+}
+
+for (const platform of ['win32', 'darwin', 'linux']) {
+  test(`Cursor local details use the ${platform} desktop log layout`, t => {
+    const { log, options } = fixture(t, platform);
+    fs.writeFileSync(log, block(start, payload({ hook_event_name: 'beforeSubmitPrompt' })) + block(start + 2000, payload()));
+    const view = readCursorLocalSessions(options);
+    assert.equal(view.sessions.today['cursor:conversation'].totalTokens, 35);
+    assert.equal(Object.values(view.projects.today)[0].tokens, 35);
+  });
 }
 
 test('hook parser retains only scalar identities, time, workspace and token counters', () => {
@@ -57,6 +71,21 @@ test('local sessions and projects recover a verified billing turn without duplic
   const covered = readCursorLocalSessions({ ...options, periods: { today: { sessions: { 'cursor:conversation': row } } } });
   assert.equal(covered.sessions.today['cursor:conversation'], undefined);
   assert.deepEqual(covered.projects.today, {});
+});
+
+test('a current desktop login cannot assign another hook owner\'s historical billing', t => {
+  const { log, options } = fixture(t);
+  t.mock.method(cursorAuth, 'readCursorDesktopAccessToken', () => 'user_current::test-token');
+  fs.writeFileSync(log, block(start, payload({ hook_event_name: 'beforeSubmitPrompt' })) + block(start + 2000, payload()));
+  const billingEmailHash = crypto.createHash('sha256').update('other@example.test').digest('hex');
+  const view = readCursorLocalSessions({ ...options,
+    billingRows: [{ ...bill, billingAccountId: 'user_current', billingEmailHash }] });
+  assert.equal(view.sessions.today['cursor:conversation'].tokenDataUnavailable, true);
+  assert.equal(view.sessions.today['cursor:conversation'].totalTokens, 0);
+  const ownHash = crypto.createHash('sha256').update('private@example.test').digest('hex');
+  const own = readCursorLocalSessions({ ...options,
+    billingRows: [{ ...bill, billingAccountId: 'user_current', billingEmailHash: ownHash }] });
+  assert.equal(own.sessions.today['cursor:conversation'].totalTokens, 35);
 });
 
 test('missing counters, mismatched bills and concurrent turns retain identity with unknown usage', t => {

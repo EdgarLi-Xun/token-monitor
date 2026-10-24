@@ -6,26 +6,29 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const cursorAuth = require('../../src/shared/providers/cursor/auth');
+const { billingAccountKey, billingIdentityHash } = require('../../src/shared/providers/cursor/billingLedger');
+const ledger = rows => ({ version: 2, accountKey: billingAccountKey('user_test'), identityHash: billingIdentityHash('owner@example.test'), rows });
 const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
 
 test('Cursor local session and project detail is attached without changing billing totals', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-detail-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   t.mock.method(cursorAuth, 'runCursorSync', async () => {});
+  t.mock.method(cursorAuth, 'readCursorDesktopAccessToken', () => 'user_test::test-token');
   const now = new Date(2026, 9, 21, 12);
   const time = new Date(2026, 9, 21, 9).getTime();
   const log = path.join(dir, '.config/Cursor/logs/20261021T090000/window1/output_090000/cursor.hooks.log');
   fs.mkdirSync(path.dirname(log), { recursive: true });
-  const row = { conversation_id: 'conversation', generation_id: 'turn', model: 'grok-4.7-high',
+  const row = { conversation_id: 'conversation', generation_id: 'turn', model: 'grok-4.7-high', user_email: 'owner@example.test',
     workspace_roots: ['/work/project'], input_tokens: 30, output_tokens: 5, cache_read_tokens: 20, cache_write_tokens: 0 };
   const block = (time, event) => `[${new Date(time).toISOString()}] Running hook\nINPUT:\n${JSON.stringify({ ...row, hook_event_name: event }, null, 2)}\n\nOUTPUT:\n(empty)\n`;
   fs.writeFileSync(log, block(time, 'beforeSubmitPrompt') + block(time + 2000, 'stop'));
   const billingPath = path.join(dir, 'billing.json');
-  fs.writeFileSync(billingPath, JSON.stringify({ rows: [{ id: 'bill', eventTime: time + 1500,
-    model: row.model, inputTokens: 10, outputTokens: 5, cacheReadTokens: 20, cacheWriteTokens: 0, totalTokens: 35 }] }));
+  fs.writeFileSync(billingPath, JSON.stringify(ledger([{ id: 'bill', eventTime: time + 1500,
+    model: row.model, inputTokens: 10, outputTokens: 5, cacheReadTokens: 20, cacheWriteTokens: 0, totalTokens: 35 }])));
   const options = { clients: 'cursor', deviceId: 'test', homeDir: dir, env: {}, platform: 'linux', now,
     osInfo: {}, wslScanEnabled: false, projectsEnabled: true, includeHistory: false,
-    cursorBillingItemsPath: billingPath, runTokscale: async () => ({ entries: [] }),
+    cursorBillingAccounts: [{ accountId: 'user_test', filePath: billingPath }], runTokscale: async () => ({ entries: [] }),
     pricingRevision: 'cursor-detail-pricing',
     lookupModelPricing: async () => ({ pricing: { inputCostPerToken: 0.000002, outputCostPerToken: 0.000006, cacheReadInputTokenCost: 5e-7 } }) };
   const result = await collectUsageOnce(options);
@@ -41,6 +44,7 @@ test('Cursor billing fills periods and history while native anchors stay free of
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-billing-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   t.mock.method(cursorAuth, 'runCursorSync', async () => {});
+  t.mock.method(cursorAuth, 'readCursorDesktopAccessToken', () => 'user_test::test-token');
   const now = new Date(2026, 9, 20, 12);
   const billingPath = path.join(dir, 'billing.json');
   const row = (day, totalTokens) => ({
@@ -48,11 +52,11 @@ test('Cursor billing fills periods and history while native anchors stay free of
     inputTokens: totalTokens, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, totalTokens
   });
   const rows = [row(19, 20), row(20, 10)];
-  fs.writeFileSync(billingPath, JSON.stringify({ rows }));
+  fs.writeFileSync(billingPath, JSON.stringify(ledger(rows)));
   const options = {
     clients: 'cursor,claude', deviceId: 'test', homeDir: dir, env: {}, now,
     allTimeSince: '2026-01-01', osInfo: {}, wslScanEnabled: false, projectsEnabled: false,
-    codexLocalUsageEnabled: false, includeHistory: true, cursorBillingItemsPath: billingPath,
+    codexLocalUsageEnabled: false, includeHistory: true, cursorBillingAccounts: [{ accountId: 'user_test', filePath: billingPath }],
     runTokscale: async () => ({ entries: [] }), runGraph: async () => ({ contributions: [] }),
     pricingRevision: 'cursor-billing-pricing',
     lookupModelPricing: async () => ({ pricing: { inputCostPerToken: 0.000002 } }),
@@ -67,9 +71,10 @@ test('Cursor billing fills periods and history while native anchors stay free of
   assert.equal(first.history?.summary.totalTokens, 30);
   assert.equal(first.history.daily.find(day => day.date === '2026-10-19').perClient.cursor.tokens, 20);
   assert.equal(captured.windowsPeriods.today.totalTokens, 0, 'supplements must not pollute exact native deltas');
-  const anchor = { dateKey: localTodayKey(now), ...captured.windowsPeriods, todayPartitions: captured.todayPartitions };
+  const anchor = { dateKey: localTodayKey(now), ...captured.windowsPeriods, todayPartitions: captured.todayPartitions,
+    cursorBillingNativeSignature: captured.cursorBillingNativeSignature };
   rows.push(row(18, 40));
-  fs.writeFileSync(billingPath, JSON.stringify({ rows }));
+  fs.writeFileSync(billingPath, JSON.stringify(ledger(rows)));
   for (const targetClients of [['claude'], ['cursor'], []]) {
     const next = await collectUsageOnce({ ...options, todayOnlyAnchor: anchor, targetClients });
     assert.equal(next.today.clients.cursor, 10);

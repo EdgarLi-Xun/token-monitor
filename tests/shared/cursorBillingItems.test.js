@@ -116,3 +116,17 @@ test('catalog rates estimate included billing instead of billed zero', () => {
   assert.equal(next.today.unpricedTokens || 0, 0);
   assert.equal(next.today.modelCosts['grok-4.7-high'], next.today.costUsd);
 });
+
+test('paid Cursor calls use the same token accounting and catalog pricing as included calls', () => {
+  const rows = rowsFromBillingPayload({ data: [item({ usageType: 'on_demand', chargedCents: 15 })] });
+  const next = supplementCursorBilling({ mode: 'full', today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() },
+    rows, NOW, { 'grok-4.7-high': { inputCostPerToken: 2e-6, outputCostPerToken: 6e-6, cacheReadInputTokenCost: 5e-7 } });
+  assert.equal(next.today.totalTokens, 35);
+  assert.equal(next.today.costUsd, 10 * 2e-6 + 5 * 6e-6 + 20 * 5e-7);
+});
+
+test('invalid or unsafe token counters cannot become fabricated zero usage', () => {
+  for (const value of [-1, 1.5, 'unknown', '9007199254740992']) {
+    assert.throws(() => rowsFromBillingPayload({ items: [item({ usage: { 'prompt-text-tokens': value } })] }), /Invalid Cursor billing token/);
+  }
+});

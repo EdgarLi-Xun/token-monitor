@@ -12,12 +12,10 @@ const { extractUsageFromTokscale, mergePeriods } = require('../../usage');
 const BILLING_ITEMS_URL = 'https://grok.com/dashboard/api/dashboard/v2/query-billing-items';
 
 function tokenCount(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.trunc(value));
-  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
-    const parsed = Number(value);
-    return Number.isSafeInteger(parsed) ? Math.max(0, parsed) : 0;
-  }
-  return 0;
+  const parsed = (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value.trim())))
+    ? Number(value) : NaN;
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error('Invalid Cursor billing token count');
+  return parsed;
 }
 
 function usageObject(value) {
@@ -51,6 +49,7 @@ function billingItemRow(item) {
   const cacheWriteTokens = tokenCount(field(usage, ['cache-write-text-tokens', 'cacheWriteTextTokens', 'cacheWriteTokens']));
   const outputTokens = tokenCount(field(usage, ['completion-text-tokens', 'completionTextTokens', 'outputTokens']));
   const totalTokens = inputTokens + cacheReadTokens + cacheWriteTokens + outputTokens;
+  if (!Number.isSafeInteger(totalTokens)) throw new Error('Invalid Cursor billing token total');
   if (totalTokens <= 0) return null;
   const id = String(item.id || item.billingItemId || item['Billing Item ID'] || '');
   return { ...(id ? { id } : {}), eventTime, model, inputTokens, cacheReadTokens, cacheWriteTokens, outputTokens, totalTokens };

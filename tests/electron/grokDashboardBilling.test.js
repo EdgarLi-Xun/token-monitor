@@ -6,11 +6,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
-const { fetchBillingItems, refreshGrokBillingItems, billingItemsPath, openGrokDashboardWindow, startGrokBillingRefresh } = require('../../src/electron/grokDashboardBilling');
+const { billingPartition, disconnectGrokBilling, fetchBillingItems, refreshGrokBillingItems,
+  billingItemsPath, openGrokDashboardWindow, startGrokBillingRefresh } = require('../../src/electron/grokDashboardBilling');
+
+const ACCOUNT = { accountId: 'test-account', expectedEmail: 'owner@example.test' };
 
 function item(id, product = 'cursor') {
   return {
-    id, product, model: 'auto', eventTime: '2026-10-20T04:00:00Z',
+    id, product, displayExtras: { userEmail: ACCOUNT.expectedEmail }, model: 'auto', eventTime: '2026-10-20T04:00:00Z',
     usage: { 'prompt-text-tokens': '10' }
   };
 }
@@ -38,7 +41,7 @@ test('billing refresh uses the logged-in dashboard renderer and not session.fetc
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   let rendererCalls = 0;
   const count = await refreshGrokBillingItems({
-    userDataPath: dir,
+    ...ACCOUNT, userDataPath: dir,
     session: { fromPartition: () => ({ fetch: () => assert.fail('net.fetch hits the Cloudflare challenge') }) },
     webContents: {
       isDestroyed: () => false,
@@ -52,31 +55,31 @@ test('billing refresh uses the logged-in dashboard renderer and not session.fetc
   });
   assert.equal(rendererCalls, 1);
   assert.equal(count, 1);
-  assert.equal(JSON.parse(fs.readFileSync(billingItemsPath(dir))).rows.length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId))).rows.length, 1);
 });
 
 test('billing ledger retains old rows, updates by billing id, and survives a failed pagination', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-retention-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const options = { userDataPath: dir, homeDir: dir, session: { fromPartition: () => ({}) } };
+  const options = { ...ACCOUNT, userDataPath: dir, homeDir: dir, session: { fromPartition: () => ({}) } };
   const fetchRows = items => async () => ({ ok: true, json: async () => ({ data: items }) });
   await refreshGrokBillingItems({ ...options, fetchImpl: fetchRows([item('old')]) });
   await refreshGrokBillingItems({ ...options, fetchImpl: fetchRows([item('new')]) });
   await refreshGrokBillingItems({ ...options, fetchImpl: fetchRows([item('new')]) });
-  const before = fs.readFileSync(billingItemsPath(dir), 'utf8');
+  const before = fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId), 'utf8');
   assert.equal(JSON.parse(before).rows.length, 2);
   await assert.rejects(refreshGrokBillingItems({
     ...options, fetchImpl: async () => ({
       ok: true, json: async () => ({ data: [item('partial')], pagination: { hasMore: true, nextCursor: 'same' } })
     })
   }), /pagination did not finish/);
-  assert.equal(fs.readFileSync(billingItemsPath(dir), 'utf8'), before);
+  assert.equal(fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId), 'utf8'), before);
 });
 
 test('today refresh queries local midnight and retains the historical ledger', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-today-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const options = { userDataPath: dir, homeDir: dir, session: { fromPartition: () => ({}) } };
+  const options = { ...ACCOUNT, userDataPath: dir, homeDir: dir, session: { fromPartition: () => ({}) } };
   await refreshGrokBillingItems({ ...options, fetchImpl: async () => ({ ok: true, json: async () => ({ data: [item('old')] }) }) });
   const now = new Date(2026, 9, 21, 6, 43);
   const midnight = new Date(2026, 9, 21);
@@ -86,7 +89,7 @@ test('today refresh queries local midnight and retains the historical ledger', a
     assert.equal(url.searchParams.get('endTime'), tomorrow.toISOString());
     return { ok: true, json: async () => ({ data: [{ ...item('new'), eventTime: now.toISOString() }] }) };
   } });
-  assert.deepEqual(JSON.parse(fs.readFileSync(billingItemsPath(dir))).rows.map(row => row.id).sort(), ['new', 'old']);
+  assert.deepEqual(JSON.parse(fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId))).rows.map(row => row.id).sort(), ['new', 'old']);
 });
 
 test('billing changes include corrected existing calls but exclude identical responses', async t => {
@@ -95,7 +98,7 @@ test('billing changes include corrected existing calls but exclude identical res
   let changes = 0;
   let row = item('same-call');
   const options = {
-    userDataPath: dir, homeDir: dir, session: { fromPartition: () => ({}) },
+    ...ACCOUNT, userDataPath: dir, homeDir: dir, session: { fromPartition: () => ({}) },
     onChanged: () => { changes++; },
     fetchImpl: async () => ({ ok: true, json: async () => ({ data: [row] }) })
   };
@@ -105,7 +108,7 @@ test('billing changes include corrected existing calls but exclude identical res
   row = { ...row, usage: { 'prompt-text-tokens': '20' } };
   await refreshGrokBillingItems(options);
   assert.equal(changes, 2);
-  assert.equal(JSON.parse(fs.readFileSync(billingItemsPath(dir))).rows.length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId))).rows.length, 1);
 });
 
 test('background billing refreshes today, periodically reconciles history and skips unchanged scans', async t => {
@@ -116,7 +119,7 @@ test('background billing refreshes today, periodically reconciles history and sk
   let published = 0;
   const starts = [];
   const stop = startGrokBillingRefresh({
-    userDataPath: dir, homeDir: dir, session: { fromPartition: () => ({}) },
+    ...ACCOUNT, userDataPath: dir, homeDir: dir, session: { fromPartition: () => ({}) },
     isEnabled: () => enabled,
     onRefresh: () => { published++; },
     fetchImpl: async url => {
@@ -156,7 +159,7 @@ test('background billing never overlaps requests or publishes after shutdown', a
   let requests = 0;
   let published = 0;
   const stop = startGrokBillingRefresh({
-    userDataPath: dir, homeDir: dir, session: { fromPartition: () => ({}) },
+    ...ACCOUNT, userDataPath: dir, homeDir: dir, session: { fromPartition: () => ({}) },
     onRefresh: () => { published++; },
     fetchImpl: () => {
       requests++;
@@ -171,6 +174,95 @@ test('background billing never overlaps requests or publishes after shutdown', a
   complete({ ok: true, json: async () => ({ data: [item('late')] }) });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(published, 0);
+  assert.equal(fs.existsSync(billingItemsPath(dir, ACCOUNT.accountId)), false, 'shutdown must also fence the ledger write');
+});
+
+test('separate Cursor accounts use separate sessions and ledgers even for equal billing ids', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-accounts-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const partitions = [];
+  const session = { fromPartition: name => { partitions.push(name); return {}; } };
+  for (const accountId of ['work', 'personal']) {
+    await refreshGrokBillingItems({ userDataPath: dir, accountId, expectedEmail: ACCOUNT.expectedEmail, session,
+      fetchImpl: async () => ({ ok: true, json: async () => ({ data: [item('same-id')] }) }) });
+  }
+  assert.notEqual(partitions[0], partitions[1]);
+  assert.equal(JSON.parse(fs.readFileSync(billingItemsPath(dir, 'work'))).rows.length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(billingItemsPath(dir, 'personal'))).rows.length, 1);
+  assert.doesNotMatch(fs.readFileSync(billingItemsPath(dir, 'work'), 'utf8'), /owner@example|"accountId"/);
+});
+
+test('wrong or missing billing owner cannot overwrite an account ledger', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-owner-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { ...ACCOUNT, userDataPath: dir, session: { fromPartition: () => ({}) } };
+  await refreshGrokBillingItems({ ...options,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ data: [item('valid')] }) }) });
+  const before = fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId), 'utf8');
+  for (const userEmail of ['', 'other@example.test']) {
+    await assert.rejects(refreshGrokBillingItems({ ...options,
+      fetchImpl: async () => ({ ok: true, json: async () => ({ data: [{ ...item('wrong'), displayExtras: { userEmail } }] }) })
+    }), { code: 'BILLING_ACCOUNT_MISMATCH' });
+    assert.equal(fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId), 'utf8'), before);
+  }
+});
+
+test('an unfinished page without a continuation cursor preserves the existing ledger', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-incomplete-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { ...ACCOUNT, userDataPath: dir, session: { fromPartition: () => ({}) } };
+  await refreshGrokBillingItems({ ...options,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ data: [item('old')] }) }) });
+  const before = fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId), 'utf8');
+  await assert.rejects(refreshGrokBillingItems({ ...options,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ data: [item('partial')], pagination: { hasMore: true } }) })
+  }), /pagination did not finish/);
+  assert.equal(fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId), 'utf8'), before);
+});
+
+test('a corrupt account ledger is not silently replaced', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-corrupt-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = billingItemsPath(dir, ACCOUNT.accountId);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, '{bad-json');
+  await assert.rejects(refreshGrokBillingItems({ ...ACCOUNT, userDataPath: dir,
+    session: { fromPartition: () => ({}) }, fetchImpl: async () => ({ ok: true, json: async () => ({ data: [item('new')] }) }) }));
+  assert.equal(fs.readFileSync(file, 'utf8'), '{bad-json');
+});
+
+test('disconnect clears only that account session and prevents an in-flight write after reconnect', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-disconnect-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cleared = [];
+  const session = { fromPartition: name => ({ clearStorageData: async () => { cleared.push(name); } }) };
+  let complete;
+  const options = { ...ACCOUNT, userDataPath: dir, session };
+  const pending = refreshGrokBillingItems({ ...options,
+    fetchImpl: () => new Promise(resolve => { complete = resolve; }) });
+  await disconnectGrokBilling({ session, accountId: ACCOUNT.accountId });
+  await refreshGrokBillingItems({ ...options,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ data: [item('new-login')] }) }) });
+  complete({ ok: true, json: async () => ({ data: [item('stale-login')] }) });
+  await assert.rejects(pending, /connection changed/);
+  assert.deepEqual(cleared, [billingPartition(ACCOUNT.accountId)]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId))).rows.map(row => row.id), ['new-login']);
+});
+
+test('a failed account does not stop the serial polling of other enabled accounts', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-independent-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const seen = [];
+  const stop = startGrokBillingRefresh({ userDataPath: dir, session: { fromPartition: () => ({}) },
+    getAccounts: () => ['bad', 'good'].map(accountId => ({ accountId, expectedEmail: ACCOUNT.expectedEmail,
+      fetchImpl: async () => { seen.push(accountId); return { ok: accountId === 'good', status: 403,
+        json: async () => ({ data: [item('good')] }) }; } })) });
+  t.after(stop);
+  t.mock.timers.tick(30000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(seen, ['bad', 'good']);
+  assert.equal(fs.existsSync(billingItemsPath(dir, 'good')), true);
 });
 
 test('dashboard script is never executed in a different page or origin', async t => {
@@ -178,7 +270,7 @@ test('dashboard script is never executed in a different page or origin', async t
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   for (const url of ['https://grok.com/dashboard/usage-other', 'https://example.test/dashboard/usage', 'about:blank']) {
     await assert.rejects(refreshGrokBillingItems({
-      userDataPath: dir, homeDir: dir, session: { fromPartition: () => ({}) },
+      ...ACCOUNT, userDataPath: dir, homeDir: dir, session: { fromPartition: () => ({}) },
       webContents: { isDestroyed: () => false, getURL: () => url, executeJavaScript: () => assert.fail('wrong origin') }
     }), /finish signing in/);
   }
@@ -209,19 +301,19 @@ test('dashboard retries when authentication settles after the first page load', 
     loadURL() {}
   }
   const window = openGrokDashboardWindow({
-    BrowserWindow: Window, session: { fromPartition: () => ({}) }, userDataPath: dir,
+    BrowserWindow: Window, session: { fromPartition: () => ({}) }, ...ACCOUNT, userDataPath: dir,
     onRefresh: count => { published += count; }
   });
   t.after(() => { window.destroyed = true; window.emit('closed'); });
   window.webContents.emit('did-finish-load');
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(requests, 1);
-  assert.equal(fs.existsSync(billingItemsPath(dir)), false);
+  assert.equal(fs.existsSync(billingItemsPath(dir, ACCOUNT.accountId)), false);
   authenticated = true;
   t.mock.timers.tick(3000);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(requests, 2, 'retry after the login document has established its authentication context');
-  assert.equal(JSON.parse(fs.readFileSync(billingItemsPath(dir))).rows.length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId))).rows.length, 1);
   assert.equal(published, 1);
   assert.equal(window.hidden, true);
   t.mock.timers.tick(60000);

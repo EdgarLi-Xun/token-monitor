@@ -7,8 +7,8 @@
 // collector. Emails and account ids are not stored.
 
 const fs = require('node:fs');
-const path = require('node:path');
-const { newestCursorUsageEventMs } = require('../shared/providers/cursor/usageEvents');
+const { readRegularFileNoFollow, writePrivateJsonAtomic } = require('../shared/credentialStore');
+const { billingAccountKey, billingIdentityHash, billingItemsPath, normalizeBillingRow, readBillingRows } = require('../shared/providers/cursor/billingLedger');
 const {
   BILLING_ITEMS_URL,
   billingRowKey,
@@ -16,7 +16,6 @@ const {
   rowsFromBillingPayload
 } = require('../shared/providers/cursor/billingItems');
 
-const PARTITION = 'persist:grok-dashboard';
 const USAGE_PAGE = 'https://grok.com/dashboard/usage';
 const PAGE_SIZE = 100;
 const MAX_PAGES = 40;
@@ -24,36 +23,55 @@ const STARTUP_RETRY_DELAYS_MS = [3000, 10000, 30000];
 const TODAY_REFRESH_MS = 30000;
 const HISTORY_REFRESH_MS = 10 * 60 * 1000;
 
-let loginWindow = null;
+const loginWindows = new Map();
+const windowScopes = new WeakMap();
 const refreshes = new Map();
+const generations = new Map();
+const statuses = new Map();
 
-function billingItemsPath(userDataPath) {
-  return path.join(userDataPath, 'cursor-billing-items.json');
+function billingPartition(accountId) {
+  return `persist:cursor-billing-${billingAccountKey(accountId)}`;
 }
 
-function dashboardSession(session) {
-  return session.fromPartition(PARTITION);
+function billingStatus(accountId) {
+  return statuses.get(accountId) || 'notConnected';
 }
 
-function writeRows(filePath, rows) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+function setBillingStatus(accountId, status, onStatusChanged) {
+  if (billingStatus(accountId) === status) return;
+  statuses.set(accountId, status);
+  onStatusChanged?.(accountId, status);
+}
+
+function dashboardSession(session, accountId) {
+  return session.fromPartition(billingPartition(accountId));
+}
+
+function writeRows(filePath, rows, accountId, email) {
   // The API query is a rolling window. Preserve older downloaded billing rows
   // in this ledger so they do not disappear from Month/Total and History.
-  let previous = [];
-  try {
-    const stored = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    if (Array.isArray(stored.rows)) previous = stored.rows;
-  } catch (_) {}
+  const previous = readBillingRows(filePath, accountId).map(normalizeBillingRow);
+  const identityHash = billingIdentityHash(email);
+  let identityChanged = false;
+  if (fs.existsSync(filePath)) {
+    const stored = JSON.parse(readRegularFileNoFollow(filePath, { maxBytes: 64 * 1024 * 1024 }));
+    identityChanged = stored.identityHash !== identityHash;
+    if (stored.version !== 2 || stored.accountKey !== billingAccountKey(accountId) || !Array.isArray(stored.rows)
+      || stored.rows.some(row => !normalizeBillingRow(row))) {
+      throw new Error('Cursor billing ledger is invalid; keeping the existing file');
+    }
+  }
   const merged = new Map(previous.map(row => [billingRowKey(row), row]));
-  let changed = false;
-  for (const row of rows) {
+  let changed = identityChanged;
+  for (const input of rows) {
+    const row = normalizeBillingRow(input);
+    if (!row) throw new Error('Grok returned invalid token counts; keeping the previous ledger');
     const key = billingRowKey(row);
     if (JSON.stringify(merged.get(key)) !== JSON.stringify(row)) changed = true;
     merged.set(key, row);
   }
-  const temporary = `${filePath}.${process.pid}.tmp`;
-  fs.writeFileSync(temporary, JSON.stringify({ version: 1, fetchedAt: new Date().toISOString(), rows: [...merged.values()] }));
-  fs.renameSync(temporary, filePath);
+  writePrivateJsonAtomic(filePath, { version: 2, accountKey: billingAccountKey(accountId), identityHash,
+    fetchedAt: new Date().toISOString(), rows: [...merged.values()].map(normalizeBillingRow).filter(Boolean) });
   return changed;
 }
 
@@ -85,7 +103,7 @@ function dashboardFetch(webContents) {
   };
 }
 
-async function fetchBillingItems(ses, { startTime, endTime, fetchImpl } = {}) {
+async function fetchBillingItems(ses, { startTime, endTime, fetchImpl, expectedEmail } = {}) {
   const fetch = fetchImpl || ses.fetch.bind(ses);
   const rows = [];
   const seen = new Set();
@@ -107,8 +125,26 @@ async function fetchBillingItems(ses, { startTime, endTime, fetchImpl } = {}) {
       throw error;
     }
     const payload = await response.json();
+    if (expectedEmail) {
+      const items = Array.isArray(payload) ? payload : payload?.items || payload?.billingItems || payload?.rows || payload?.data;
+      if (!Array.isArray(items)) throw new Error('Grok returned an invalid billing response');
+      for (const item of items) {
+        if (String(item?.product || item?.Product || '').toLowerCase() !== 'cursor') continue;
+        // Verify the authenticated billing owner before discarding identity
+        // metadata. Neither an email nor a raw account id enters the ledger.
+        const email = String(item.displayExtras?.userEmail || '').trim().toLowerCase();
+        if (!email || email !== expectedEmail.trim().toLowerCase()) {
+          const error = new Error('Sign in to Grok with the same email as this Cursor account');
+          error.code = 'BILLING_ACCOUNT_MISMATCH';
+          throw error;
+        }
+      }
+    }
     const batch = rowsFromBillingPayload(payload);
     const token = nextPageToken(payload);
+    if (payload?.pagination?.hasMore === true && !token) {
+      throw new Error('Grok billing pagination did not finish; keeping the previous ledger');
+    }
     for (const row of batch) {
       const key = billingRowKey(row);
       if (seen.has(key)) continue;
@@ -126,19 +162,29 @@ async function fetchBillingItems(ses, { startTime, endTime, fetchImpl } = {}) {
 }
 
 function refreshGrokBillingItems(options = {}) {
-  const filePath = billingItemsPath(options.userDataPath);
-  if (!refreshes.has(filePath)) {
-    const pending = downloadBillingItems(options).finally(() => refreshes.delete(filePath));
-    refreshes.set(filePath, pending);
+  const filePath = billingItemsPath(options.userDataPath, options.accountId);
+  const generation = generations.get(options.accountId) || 0;
+  const isCurrent = () => (generations.get(options.accountId) || 0) === generation && options.isCurrent?.() !== false;
+  const key = `${filePath}:${generation}`;
+  if (!refreshes.has(key)) {
+    const pending = downloadBillingItems({ ...options, isCurrent }).finally(() => refreshes.delete(key));
+    refreshes.set(key, pending);
   }
-  return refreshes.get(filePath).then(async ({ count, changed }) => {
-    if (changed) await options.onChanged?.();
+  return refreshes.get(key).then(async ({ count, changed }) => {
+    if (changed && isCurrent()) await options.onChanged?.();
     return count;
+  }).catch(error => {
+    if (isCurrent()) setBillingStatus(options.accountId,
+      error.code === 'BILLING_ACCOUNT_MISMATCH' ? 'accountMismatch' : 'signInRequired', options.onStatusChanged);
+    throw error;
   });
 }
 
-async function downloadBillingItems({ session, userDataPath, now = new Date(), todayOnly = false, logger, fetchImpl, webContents, homeDir } = {}) {
-  const ses = dashboardSession(session);
+async function downloadBillingItems({ session, userDataPath, accountId, expectedEmail,
+  now = new Date(), todayOnly = false, logger, fetchImpl, webContents, isCurrent, onStatusChanged } = {}) {
+  if (!expectedEmail?.trim()) throw new Error('Verify the Cursor account before connecting billing recovery');
+  if (!isCurrent()) throw new Error('Cursor billing connection changed during refresh');
+  const ses = dashboardSession(session, accountId);
   const end = new Date(now);
   const start = new Date(now);
   if (todayOnly) {
@@ -150,20 +196,21 @@ async function downloadBillingItems({ session, userDataPath, now = new Date(), t
     end.setUTCHours(0, 0, 0, 0);
     start.setTime(end.getTime());
     start.setUTCDate(start.getUTCDate() - 21);
-    const nativeThrough = newestCursorUsageEventMs({ homeDir });
-    if (nativeThrough > start.getTime() && nativeThrough < end.getTime()) start.setTime(nativeThrough);
   }
   const rows = await fetchBillingItems(ses, {
     startTime: start.toISOString(),
     endTime: end.toISOString(),
-    fetchImpl: fetchImpl || dashboardFetch(webContents || loginWindow?.webContents)
+    expectedEmail,
+    fetchImpl: fetchImpl || dashboardFetch(webContents || loginWindows.get(accountId)?.webContents)
   });
-  const changed = writeRows(billingItemsPath(userDataPath), rows);
+  if (!isCurrent()) throw new Error('Cursor billing connection changed during refresh');
+  const changed = writeRows(billingItemsPath(userDataPath, accountId), rows, accountId, expectedEmail);
+  setBillingStatus(accountId, 'connected', onStatusChanged);
   if (typeof logger === 'function') logger(`grok billing items stored ${rows.length} cursor rows`);
   return { count: rows.length, changed };
 }
 
-function startGrokBillingRefresh({ isEnabled = () => true, onRefresh, ...options }) {
+function startGrokBillingRefresh({ isEnabled = () => true, getAccounts, onRefresh, ...options }) {
   let lastHistoryRefresh = Date.now();
   let refreshing = false;
   let stopped = false;
@@ -172,13 +219,23 @@ function startGrokBillingRefresh({ isEnabled = () => true, onRefresh, ...options
     refreshing = true;
     const todayOnly = Date.now() - lastHistoryRefresh < HISTORY_REFRESH_MS;
     try {
-      await refreshGrokBillingItems({
-        ...options,
-        todayOnly,
-        onChanged: () => {
-          if (!stopped && isEnabled()) return onRefresh?.();
+      const accounts = getAccounts ? await getAccounts() : [options];
+      for (const account of accounts) {
+        if (stopped || !isEnabled()) break;
+        if (account.isCurrent?.() === false) continue;
+        try {
+          if (options.BrowserWindow && !loginWindows.has(account.accountId)) {
+            openGrokDashboardWindow({ ...options, ...account, show: false,
+              isCurrent: () => !stopped && isEnabled() && account.isCurrent?.() !== false,
+              onRefresh });
+          }
+          await refreshGrokBillingItems({ ...options, ...account, todayOnly,
+            isCurrent: () => !stopped && isEnabled() && account.isCurrent?.() !== false,
+            onChanged: () => { if (!stopped && isEnabled()) return onRefresh?.(); } });
+        } catch (error) {
+          if (error?.status !== 401 && error?.status !== 403) options.logger?.(error.message);
         }
-      });
+      }
       if (!todayOnly) lastHistoryRefresh = Date.now();
     } catch (error) {
       if (error?.status !== 401 && error?.status !== 403) options.logger?.(error.message);
@@ -193,17 +250,26 @@ function startGrokBillingRefresh({ isEnabled = () => true, onRefresh, ...options
   };
 }
 
-function openGrokDashboardWindow({ BrowserWindow, session, userDataPath, logger, onRefresh }) {
-  if (loginWindow && !loginWindow.isDestroyed()) {
-    loginWindow.show();
-    loginWindow.focus();
-    return loginWindow;
+function openGrokDashboardWindow({ BrowserWindow, session, userDataPath, accountId, expectedEmail,
+  logger, onRefresh, onStatusChanged, show = true, isCurrent = () => true }) {
+  const existing = loginWindows.get(accountId);
+  if (existing && !existing.isDestroyed()) {
+    const scope = windowScopes.get(existing);
+    if (scope?.isCurrent() !== false && scope?.email === expectedEmail) {
+      if (show) { existing.show(); existing.focus(); }
+      return existing;
+    }
+    generations.set(accountId, (generations.get(accountId) || 0) + 1);
+    existing.destroy();
   }
-  const ses = dashboardSession(session);
-  loginWindow = new BrowserWindow({
+  const generation = generations.get(accountId) || 0;
+  const current = () => (generations.get(accountId) || 0) === generation && isCurrent();
+  const ses = dashboardSession(session, accountId);
+  const window = new BrowserWindow({
+    show,
     width: 1100,
     height: 800,
-    title: 'Grok usage',
+    title: 'Cursor billing recovery — Grok sign-in',
     autoHideMenuBar: true,
     webPreferences: {
       session: ses,
@@ -212,25 +278,30 @@ function openGrokDashboardWindow({ BrowserWindow, session, userDataPath, logger,
       sandbox: true
     }
   });
-  const window = loginWindow;
+  loginWindows.set(accountId, window);
+  windowScopes.set(window, { isCurrent: current, email: expectedEmail });
+  setBillingStatus(accountId, 'signInRequired', onStatusChanged);
   let refreshing = false;
   let retryTimer = null;
   let retryAttempt = 0;
   const refresh = () => {
-    if (refreshing || window.isDestroyed()) return;
+    if (refreshing || window.isDestroyed() || !current()) return;
     clearTimeout(retryTimer);
     retryTimer = null;
     refreshing = true;
-    refreshGrokBillingItems({ session, userDataPath, logger, webContents: window.webContents }).then(async (count) => {
+    refreshGrokBillingItems({ session, userDataPath, accountId, expectedEmail, logger,
+      isCurrent: current, onStatusChanged, webContents: window.webContents }).then(async (count) => {
+      if (!current() || window.isDestroyed()) return;
       if (count > 0 && !window.isDestroyed()) window.hide();
       await onRefresh?.(count);
       retryAttempt = 0;
     }).catch((error) => {
+      if (!current()) return;
       if (typeof logger === 'function') logger(`grok billing items unavailable: ${error.message}`);
       // did-finish-load can precede the dashboard's authentication bootstrap.
       // Retry promptly once the document has established its login context.
       const delay = STARTUP_RETRY_DELAYS_MS[retryAttempt++];
-      if (delay !== undefined && !window.isDestroyed()) {
+      if (delay !== undefined && !window.isDestroyed() && current()) {
         retryTimer = setTimeout(refresh, delay);
         retryTimer.unref?.();
       }
@@ -243,15 +314,28 @@ function openGrokDashboardWindow({ BrowserWindow, session, userDataPath, logger,
   window.webContents.on('did-navigate-in-page', refreshPage);
   window.on('closed', () => {
     clearTimeout(retryTimer);
-    if (loginWindow === window) loginWindow = null;
+    if (loginWindows.get(accountId) === window) loginWindows.delete(accountId);
   });
-  window.loadURL(USAGE_PAGE);
+  window.loadURL(USAGE_PAGE)?.catch?.(() => {
+    if (current()) setBillingStatus(accountId, 'signInRequired', onStatusChanged);
+  });
   return window;
 }
 
+async function disconnectGrokBilling({ session, accountId }) {
+  generations.set(accountId, (generations.get(accountId) || 0) + 1);
+  const window = loginWindows.get(accountId);
+  loginWindows.delete(accountId);
+  if (window && !window.isDestroyed()) window.destroy();
+  statuses.delete(accountId);
+  await dashboardSession(session, accountId).clearStorageData();
+}
+
 module.exports = {
-  PARTITION,
+  billingPartition,
+  billingStatus,
   billingItemsPath,
+  disconnectGrokBilling,
   fetchBillingItems,
   openGrokDashboardWindow,
   refreshGrokBillingItems,
