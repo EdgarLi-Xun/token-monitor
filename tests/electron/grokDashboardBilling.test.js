@@ -207,6 +207,23 @@ test('wrong or missing billing owner cannot overwrite an account ledger', async 
   }
 });
 
+test('normalized Cursor product labels still require the verified billing owner', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-normalized-owner-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { ...ACCOUNT, userDataPath: dir, session: { fromPartition: () => ({}) } };
+  const fetchRows = rows => async () => ({ ok: true, json: async () => ({ items: rows }) });
+  await refreshGrokBillingItems({ ...options, fetchImpl: fetchRows([item('valid')]) });
+  const before = fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId), 'utf8');
+  for (const product of [{ product: ' CURSOR ' }, { product: undefined, Product: ' CURSOR ' }]) {
+    for (const userEmail of ['', 'other@example.test']) {
+      const row = { ...item('wrong'), ...product, displayExtras: { userEmail } };
+      await assert.rejects(refreshGrokBillingItems({ ...options, fetchImpl: fetchRows([row]) }),
+        { code: 'BILLING_ACCOUNT_MISMATCH' });
+      assert.equal(fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId), 'utf8'), before);
+    }
+  }
+});
+
 test('an unfinished page without a continuation cursor preserves the existing ledger', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-incomplete-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

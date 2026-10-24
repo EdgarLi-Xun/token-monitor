@@ -129,7 +129,7 @@ async function fetchBillingItems(ses, { startTime, endTime, fetchImpl, expectedE
       const items = Array.isArray(payload) ? payload : payload?.items || payload?.billingItems || payload?.rows || payload?.data;
       if (!Array.isArray(items)) throw new Error('Grok returned an invalid billing response');
       for (const item of items) {
-        if (String(item?.product || item?.Product || '').toLowerCase() !== 'cursor') continue;
+        if (String(item?.product || item?.Product || '').trim().toLowerCase() !== 'cursor') continue;
         // Verify the authenticated billing owner before discarding identity
         // metadata. Neither an email nor a raw account id enters the ledger.
         const email = String(item.displayExtras?.userEmail || '').trim().toLowerCase();
