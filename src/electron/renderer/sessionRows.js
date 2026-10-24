@@ -468,6 +468,7 @@
       // as the cumulative token total. Do not hide it merely because the
       // period cannot be split exactly.
       cost: tokenDataUnavailable ? 0 : finiteNumber(session?.reportedCostUsd),
+      ...(session?.unpricedTokens > 0 ? { unpricedTokens: finiteNumber(session.unpricedTokens) } : {}),
       sessionDetailAvailable: session?.sessionDetailAvailable === true,
       color: colors[client] || stable(key, palette),
       stale: false,

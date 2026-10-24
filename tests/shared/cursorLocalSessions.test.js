@@ -88,6 +88,47 @@ test('a current desktop login cannot assign another hook owner\'s historical bil
   assert.equal(own.sessions.today['cursor:conversation'].totalTokens, 35);
 });
 
+test('local turn counters restore details without a dashboard session or model attribution', t => {
+  const { log, options } = fixture(t);
+  fs.writeFileSync(log, block(start, payload({ hook_event_name: 'beforeSubmitPrompt' }))
+    + block(start + 2000, payload()) + block(start + 2100, payload()));
+  const view = readCursorLocalSessions({ ...options, billingRows: [] });
+  const row = view.sessions.today['cursor:conversation'];
+  assert.equal(row.totalTokens, 35);
+  assert.equal(row.inputTokens, 10, 'input includes cache and must not count it twice');
+  assert.equal(row.cacheReadTokens, 20);
+  assert.equal(row.tokenDataUnavailable, false);
+  assert.equal(row.unpricedTokens, 35, 'a local token total does not establish billed cost');
+  assert.equal(row.messageCount, 1);
+  assert.deepEqual(row.models, {}, 'a turn total does not prove a per-model billing split');
+  assert.equal(view.projects.today[row.projectId].tokens, 35);
+  assert.equal(view.totalTokens, undefined);
+  const covered = readCursorLocalSessions({ ...options, billingRows: [],
+    periods: { today: { sessions: { 'cursor:conversation': row } } } });
+  assert.equal(covered.sessions.today['cursor:conversation'], undefined);
+  fs.writeFileSync(log, block(start, payload({ hook_event_name: 'beforeSubmitPrompt' }))
+    + block(start + 2000, payload({ input_tokens: 0, output_tokens: 0, cache_read_tokens: 0 })));
+  const zero = readCursorLocalSessions({ ...options, billingRows: [] }).sessions.today['cursor:conversation'];
+  assert.equal(zero.totalTokens, 0);
+  assert.equal(zero.tokenDataUnavailable, false, 'explicit complete zero counters remain known');
+});
+
+test('direct local counters require matching turn ownership and a complete valid vector', t => {
+  const { log, options } = fixture(t);
+  for (const [before, after] of [
+    [null, payload()],
+    [payload({ hook_event_name: 'beforeSubmitPrompt' }), payload({ user_email: 'other@example.test' })],
+    [payload({ hook_event_name: 'beforeSubmitPrompt', user_email: null }), payload({ user_email: null })],
+    [payload({ hook_event_name: 'beforeSubmitPrompt' }), payload({ output_tokens: undefined })],
+    [payload({ hook_event_name: 'beforeSubmitPrompt' }), payload({ input_tokens: 10 })]
+  ]) {
+    fs.writeFileSync(log, (before ? block(start, before) : '') + block(start + 2000, after));
+    const row = readCursorLocalSessions({ ...options, billingRows: [] }).sessions.today['cursor:conversation'];
+    assert.equal(row.totalTokens, 0);
+    assert.equal(row.tokenDataUnavailable, true);
+  }
+});
+
 test('missing counters, mismatched bills and concurrent turns retain identity with unknown usage', t => {
   const { log, options } = fixture(t);
   fs.writeFileSync(log, block(start, payload({ hook_event_name: 'beforeSubmitPrompt' }))

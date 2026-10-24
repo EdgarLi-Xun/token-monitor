@@ -126,6 +126,20 @@ function matchBilling(turns, rows) {
   for (const turn of turns) if (turn.bills.some(row => claims.get(row) !== 1)) turn.bills = [];
 }
 
+function localTurnUsage(turn) {
+  const counters = turn.stop?.counters;
+  if (!turn.start || !counters || turn.to < turn.from || !turn.start.accountHash
+    || turn.start.accountHash !== turn.stop.accountHash) return null;
+  const [input, output, read, write] = counters;
+  const totalTokens = input + output;
+  if (input < read + write || !Number.isSafeInteger(totalTokens)) return null;
+  // Cursor copies its TurnEndedUpdate into turnTokenUsage and the stop hook.
+  // Input already includes cache. This is an observed local turn total; the
+  // selected model alone cannot prove a per-model billing breakdown.
+  return { eventTime: turn.to, totalTokens, inputTokens: input - read - write,
+    outputTokens: output, cacheReadTokens: read, cacheWriteTokens: write };
+}
+
 function readCursorLocalSessions(options = {}) {
   const now = new Date(options.now || Date.now());
   const since = Date.parse(options.allTimeSince || '') || 0;
@@ -134,14 +148,18 @@ function readCursorLocalSessions(options = {}) {
   const bounds = { today: Math.max(since, +today), month: Math.max(since, +month), allTime: since };
   const view = { sessions: { today: {}, month: {}, allTime: {} }, projects: { today: {}, month: {}, allTime: {} } };
   const turns = turnsFromEvents(readEvents(options), +now);
-  matchBilling(turns, options.billingRows || []);
+  const billingRows = options.billingRows || [];
+  matchBilling(turns, billingRows);
+  for (const turn of turns) {
+    turn.usage = billingRows.length ? turn.bills : [localTurnUsage(turn)].filter(Boolean);
+  }
   const ids = new Set(turns.filter(turn => turn.row.time >= since).map(turn => turn.row.sessionId));
   const metadata = options.metadata || resolveSessionMetadata(ids, { home: options.homeDir,
     now: +now, deps: { env: options.env, platform: options.platform } });
   for (const [name, from] of Object.entries(bounds)) {
     const grouped = new Map();
     for (const turn of turns) {
-      const bills = turn.bills.filter(row => row.eventTime >= from && row.eventTime <= +now);
+      const bills = turn.usage.filter(row => row.eventTime >= from && row.eventTime <= +now);
       if (turn.row.time < from && !bills.length) continue;
       const key = `cursor:${turn.row.sessionId}`;
       if (options.periods?.[name]?.sessions?.[key]) continue;
@@ -150,7 +168,7 @@ function readCursorLocalSessions(options = {}) {
     }
     for (const [key, entries] of grouped) {
       const latest = entries.reduce((a, b) => a.turn.row.time > b.turn.row.time ? a : b).turn.row;
-      const unknown = entries.some(entry => !entry.turn.bills.length);
+      const unknown = entries.some(entry => !entry.turn.usage.length);
       const bills = [...new Set(entries.flatMap(entry => entry.bills))];
       const session = { client: 'cursor', sessionId: latest.sessionId,
         title: metadata.get(latest.sessionId)?.title || '', model: latest.model,
@@ -160,8 +178,11 @@ function readCursorLocalSessions(options = {}) {
         tokenDataUnavailable: unknown || !bills.length, models: {},
         ...(latest.event === 'stop' ? { turnEnded: true } : {}),
         sessionDetailAvailable: false };
+      if (session.totalTokens > 0) session.unpricedTokens = session.totalTokens;
       for (const token of tokenKeys) session[token] = unknown ? 0 : bills.reduce((sum, row) => sum + row[token], 0);
-      if (!unknown) for (const row of bills) session.models[row.model] = (session.models[row.model] || 0) + row.totalTokens;
+      if (!unknown) for (const row of bills) {
+        if (row.model) session.models[row.model] = (session.models[row.model] || 0) + row.totalTokens;
+      }
       const paths = [...new Set(entries.map(entry => entry.turn.row.projectPath).filter(Boolean))];
       const identities = options.projectsEnabled === false ? [] : paths.map(value => options.projectIdentity?.(value) || {});
       if (identities.length && identities.every(value => value.projectId && value.projectId === identities[0].projectId)) Object.assign(session, identities[0]);
@@ -170,6 +191,7 @@ function readCursorLocalSessions(options = {}) {
       const project = view.projects[name][session.projectId] ||= { projectId: session.projectId, label: session.projectLabel,
         tokens: 0, clients: {}, models: {}, tokenDataUnavailable: false };
       project.tokens += session.totalTokens;
+      if (session.unpricedTokens) project.unpricedTokens = (project.unpricedTokens || 0) + session.unpricedTokens;
       project.clients.cursor = (project.clients.cursor || 0) + session.totalTokens;
       project.tokenDataUnavailable ||= session.tokenDataUnavailable;
       for (const [model, tokens] of Object.entries(session.models)) project.models[model] = (project.models[model] || 0) + tokens;

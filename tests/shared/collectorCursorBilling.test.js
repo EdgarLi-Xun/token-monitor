@@ -9,6 +9,7 @@ const cursorAuth = require('../../src/shared/providers/cursor/auth');
 const { billingAccountKey, billingIdentityHash } = require('../../src/shared/providers/cursor/billingLedger');
 const ledger = rows => ({ version: 2, accountKey: billingAccountKey('user_test'), identityHash: billingIdentityHash('owner@example.test'), rows });
 const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+const { normalizeDeviceRecord } = require('../../src/shared/usage');
 
 test('Cursor local session and project detail is attached without changing billing totals', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-detail-'));
@@ -36,6 +37,15 @@ test('Cursor local session and project detail is attached without changing billi
   assert.equal(result.today.sessions['cursor:conversation'], undefined);
   assert.equal(result.nativeSessions?.today['cursor:conversation']?.totalTokens, 35);
   assert.equal(Object.values(result.nativeProjects.today)[0].tokens, 35);
+  const direct = await collectUsageOnce({ ...options, cursorBillingAccounts: [] });
+  assert.equal(direct.nativeSessions?.today['cursor:conversation']?.totalTokens, 35,
+    'local Cursor details must not depend on connecting Grok billing');
+  assert.equal(Object.values(direct.nativeProjects.today)[0].tokens, 35);
+  assert.equal(direct.today.totalTokens, 0, 'local details stay outside account accounting');
+  const wire = normalizeDeviceRecord(direct);
+  assert.equal(wire.nativeSessions, undefined);
+  assert.equal(wire.nativeProjects, undefined);
+  assert.equal(wire.periods.today.totalTokens, 0);
   const project = Object.values(result.nativeProjects.today)[0];
   for (const billingRows of [JSON.parse(fs.readFileSync(billingPath)).rows, []]) {
     fs.writeFileSync(billingPath, JSON.stringify(ledger(billingRows)));
@@ -49,9 +59,9 @@ test('Cursor local session and project detail is attached without changing billi
       }) } });
     for (const name of ['today', 'month', 'allTime']) {
       const merged = combined.nativeProjects[name][project.projectId];
-      assert.equal(merged.tokens, billingRows.length ? 85 : 50, 'Cursor details must retain the other tool subtotal');
+      assert.equal(merged.tokens, 85, 'Cursor details must retain the other tool subtotal');
       assert.equal(merged.clients.reasonix, 50);
-      assert.equal(merged.clients.cursor || 0, billingRows.length ? 35 : 0);
+      assert.equal(merged.clients.cursor, 35);
       assert.equal(merged.models['claude-sonnet-4'], 50);
       assert.equal(combined[name].clients.cursor || 0, billingRows.length ? 35 : 0,
         'local project details must not add accounting');

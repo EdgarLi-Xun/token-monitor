@@ -28,6 +28,11 @@ test('Cursor native rows display the real title and retain unavailable usage', (
   assert.match(row.subtitle, /Cursor/);
   const [hidden] = sessionRowsForPeriod({}, { nativeSessions: { 'cursor:cursor-local': { ...session, title: '' } } });
   assert.doesNotMatch(hidden.name, /Real conversation/);
+  const [local] = sessionRowsForPeriod({}, { nativeSessions: { 'cursor:cursor-local': {
+    ...session, totalTokens: 35, unpricedTokens: 35, tokenDataUnavailable: false, models: {}
+  } } });
+  assert.equal(local.value, 35);
+  assert.equal(local.unpricedTokens, 35, 'local counters must not display a fabricated free cost');
 });
 
 test('archived usage joins only matching active native state while retaining its token and cost values', () => {

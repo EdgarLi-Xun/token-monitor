@@ -6,10 +6,11 @@ const { clientGradient, projectBreakdownIncomplete, projectRowsForPeriod } = req
 const { projectModelAliasStats } = require('../../src/electron/modelAliasPresentation');
 
 test('Cursor native projects retain real identity when usage is unavailable', () => {
-  const projects = { exact: { label: 'Exact', tokens: 35, clients: { cursor: 35 } },
+  const projects = { exact: { label: 'Exact', tokens: 35, unpricedTokens: 35, clients: { cursor: 35 } },
     unknown: { label: 'Unknown', tokens: 0, clients: { cursor: 0 }, tokenDataUnavailable: true } };
   const rows = projectRowsForPeriod({}, { nativeProjects: projects });
   assert.equal(rows.find(row => row.name === 'Exact').value, 35);
+  assert.equal(rows.find(row => row.name === 'Exact').unpricedTokens, 35);
   assert.equal(rows.find(row => row.name === 'Unknown').tokenDataUnavailable, true);
   assert.deepEqual(rows.find(row => row.name === 'Unknown').clients, ['cursor']);
 });

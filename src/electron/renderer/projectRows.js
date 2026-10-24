@@ -119,6 +119,8 @@
       const tokens = Math.max(0, Number(entry.tokens || 0));
       project.value += tokens;
       if (entry.tokenDataUnavailable === true) project.tokenDataUnavailable = true;
+      const unpriced = unpricedTokensFor(entry.unpricedTokens, entry.tokens);
+      if (unpriced > 0) project.unpricedTokens = (project.unpricedTokens || 0) + unpriced;
       // Reasonix native project telemetry is local reference data only. Its
       // reported session cost must never become generic project cost.
       addModelTokens(project.modelTokens, entry.models, tokens);

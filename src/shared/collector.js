@@ -899,6 +899,9 @@ function mergeNativeProjectDetails(existing = {}, incoming = {}) {
     };
     projects[id] = { ...previous, ...project,
       tokens: (Number(previous.tokens) || 0) + (Number(project.tokens) || 0),
+      ...((previous.unpricedTokens || project.unpricedTokens) ? {
+        unpricedTokens: (Number(previous.unpricedTokens) || 0) + (Number(project.unpricedTokens) || 0)
+      } : {}),
       clients: sumCounts('clients'), models: sumCounts('models'),
       tokenDataUnavailable: previous.tokenDataUnavailable === true || project.tokenDataUnavailable === true };
   }
@@ -1379,7 +1382,7 @@ async function collectUsageOnce(options) {
       summary.nativeProjects = empty.projects;
     }
   }
-  if (trackedClientSet.has('cursor') && options.cursorBillingAccounts?.length) {
+  if (trackedClientSet.has('cursor')) {
     const cursorView = require('./providers/cursor/localSessions').readCursorLocalSessions({
       homeDir: options.homeDir, env: options.env, platform: platformValue, now: collectedAt,
       allTimeSince, projectsEnabled, projectIdentity, billingRows: cursorBillingRows,
