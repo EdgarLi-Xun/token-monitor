@@ -67,7 +67,7 @@ function hookFiles(options) {
 function readEvents(options) {
   const cache = options.cache || logCache;
   const files = hookFiles(options);
-  const result = [];
+  const runs = new Map();
   for (const file of files) {
     try {
       const stat = fs.statSync(file);
@@ -78,10 +78,31 @@ function readEvents(options) {
         cached = { stamp, rows: parseHookLog(fs.readFileSync(file, 'utf8')) };
         cache.set(file, cached);
       }
-      result.push(...cached.rows);
+      const runPath = path.resolve(path.dirname(file), '../..');
+      if (!runs.has(runPath)) runs.set(runPath, { path: runPath, rows: [], firstTime: Infinity });
+      const run = runs.get(runPath);
+      run.rows.push(...cached.rows);
+      for (const row of cached.rows) run.firstTime = Math.min(run.firstTime, row.time);
     } catch (_) { /* A growing/rotating log is retried at the next collection. */ }
   }
   for (const file of cache.keys()) if (!files.has(file)) cache.delete(file);
+  const profiles = new Map();
+  for (const run of runs.values()) {
+    if (!run.rows.length) continue;
+    const profile = path.dirname(run.path);
+    if (!profiles.has(profile)) profiles.set(profile, []);
+    profiles.get(profile).push(run);
+  }
+  const result = [];
+  for (const profileRuns of profiles.values()) {
+    profileRuns.sort((a, b) => a.firstTime - b.firstTime);
+    for (const [i, run] of profileRuns.entries()) {
+      // A subsequent run in the same profile proves the old process ended.
+      // Do not guess a duration for an unfinished turn in the current run.
+      const runEnd = profileRuns[i + 1]?.firstTime || Infinity;
+      for (const row of run.rows) result.push({ ...row, run: run.path, runEnd });
+    }
+  }
   return result;
 }
 
@@ -89,7 +110,7 @@ function turnsFromEvents(events, now) {
   const turns = new Map();
   for (const event of events) {
     if (event.time > now) continue;
-    const key = `${event.sessionId}:${event.requestId}`;
+    const key = `${event.run}:${event.sessionId}:${event.requestId}`;
     const turn = turns.get(key) || {};
     const field = event.event === 'stop' ? 'stop' : 'start';
     if (!turn[field] || event.time >= turn[field].time) turn[field] = event;
@@ -111,7 +132,8 @@ function matchBilling(turns, rows) {
     // This pairing requires both token evidence and a unique local turn. A
     // nearby timestamp by itself is never enough to assign account billing.
     if (turns.some(other => other !== turn && other.row.sessionId !== turn.row.sessionId
-      && other.row.model === turn.row.model && other.from <= turn.to && other.to >= turn.from)) continue;
+      && other.row.model === turn.row.model && other.from <= turn.to && other.to >= turn.from
+      && (other.stop || other.row.runEnd > turn.from))) continue;
     const candidates = rows.filter(row => row.model === turn.row.model && row.eventTime >= turn.from && row.eventTime <= turn.to
       && (!row.billingAccountId || (turn.row.accountHash && row.billingEmailHash === turn.row.accountHash)));
     if (!candidates.length) continue;

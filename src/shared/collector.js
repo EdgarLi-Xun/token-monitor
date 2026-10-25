@@ -1384,16 +1384,20 @@ async function collectUsageOnce(options) {
     }
   }
   if (trackedClientSet.has('cursor')) {
-    const cursorView = require('./providers/cursor/localSessions').readCursorLocalSessions({
-      homeDir: options.homeDir, env: options.env, platform: platformValue, now: collectedAt,
-      allTimeSince, projectsEnabled, projectIdentity, billingRows: cursorBillingRows,
-      periods: { today, month, allTime }
-    });
-    for (const [field, values] of [['nativeSessions', cursorView.sessions], ['nativeProjects', cursorView.projects]]) {
-      summary[field] = Object.fromEntries(['today', 'month', 'allTime'].map(name =>
-        [name, field === 'nativeProjects'
-          ? mergeNativeProjectDetails(summary[field]?.[name], values[name])
-          : { ...summary[field]?.[name], ...values[name] }]));
+    try {
+      const cursorView = require('./providers/cursor/localSessions').readCursorLocalSessions({
+        homeDir: options.homeDir, env: options.env, platform: platformValue, now: collectedAt,
+        allTimeSince, projectsEnabled, projectIdentity, billingRows: cursorBillingRows,
+        periods: { today, month, allTime }
+      });
+      for (const [field, values] of [['nativeSessions', cursorView.sessions], ['nativeProjects', cursorView.projects]]) {
+        summary[field] = Object.fromEntries(['today', 'month', 'allTime'].map(name =>
+          [name, field === 'nativeProjects'
+            ? mergeNativeProjectDetails(summary[field]?.[name], values[name])
+            : { ...summary[field]?.[name], ...values[name] }]));
+      }
+    } catch (error) {
+      if (typeof options.logger === 'function') options.logger(`cursor local session scan failed: ${error.message}`);
     }
   }
   if (typeof options.onAnchorComputed === 'function') {

@@ -17477,6 +17477,7 @@ function renderCursorStatus() {
             ? { status: result.status, error: '', busy: false }
             : { ...state.cursorAccount, error: result?.error || t('settings.common.error') };
         } catch (error) { state.cursorAccount = { ...state.cursorAccount, error: error.message }; }
+        finally { button.disabled = false; }
         renderCursorStatus();
       };
       connectBilling.addEventListener('click', () => runBillingAction(connectBilling, window.tokenMonitor.cursor.connectBilling));

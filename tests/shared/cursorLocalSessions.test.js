@@ -33,6 +33,48 @@ function fixture(t, platform = 'linux') {
     billingRows: [bill], cache: new Map(), metadata: new Map([['conversation', { title: 'Real title' }]]) } };
 }
 
+for (const newRun of [false, true]) {
+  test(`unfinished turns ${newRun ? 'stop competing after a subsequent Cursor run' : 'still compete within the same Cursor run'}`, t => {
+    const { log, options } = fixture(t);
+    fs.writeFileSync(log, block(start, payload({ hook_event_name: 'beforeSubmitPrompt', conversation_id: 'orphan' })));
+    const later = start + 60 * 60 * 1000;
+    const nextLog = newRun ? log.replace('20261021T090000', '20261021T100000') : log;
+    fs.mkdirSync(path.dirname(nextLog), { recursive: true });
+    fs.appendFileSync(nextLog, block(later, payload({ hook_event_name: 'beforeSubmitPrompt' })) + block(later + 2000, payload()));
+    const view = readCursorLocalSessions({ ...options, billingRows: [{ ...bill, eventTime: later + 1500 }] });
+    assert.equal(view.sessions.today['cursor:conversation'].totalTokens, newRun ? 35 : 0);
+    assert.equal(view.sessions.today['cursor:orphan'].tokenDataUnavailable, true);
+  });
+}
+
+test('a subsequent run cannot complete an older run with a reused turn identity', t => {
+  const { log, options } = fixture(t);
+  fs.writeFileSync(log, block(start, payload({ hook_event_name: 'beforeSubmitPrompt' })));
+  const later = start + 60 * 60 * 1000;
+  const nextLog = log.replace('20261021T090000', '20261021T100000');
+  fs.mkdirSync(path.dirname(nextLog), { recursive: true });
+  fs.writeFileSync(nextLog, block(later + 2000, payload()));
+  const view = readCursorLocalSessions({ ...options, billingRows: [] });
+  assert.equal(view.sessions.today['cursor:conversation'].tokenDataUnavailable, true);
+  assert.equal(view.sessions.today['cursor:conversation'].totalTokens, 0);
+});
+
+test('a different desktop profile cannot retire an unfinished run', t => {
+  const { log, options } = fixture(t, 'win32');
+  options.env = { APPDATA: path.join(options.homeDir, 'alternate-roaming') };
+  fs.writeFileSync(log, block(start, payload({ hook_event_name: 'beforeSubmitPrompt', conversation_id: 'orphan' })));
+  const alternate = cursorDesktopStateCandidates({ home: options.homeDir, platform: 'win32', env: options.env })
+    .find(file => !log.startsWith(path.resolve(path.dirname(file), '../../logs')));
+  assert.ok(alternate);
+  const later = start + 60 * 60 * 1000;
+  const nextLog = path.join(path.resolve(path.dirname(alternate), '../../logs'),
+    '20261021T100000/window1/output_100000/cursor.hooks.log');
+  fs.mkdirSync(path.dirname(nextLog), { recursive: true });
+  fs.writeFileSync(nextLog, block(later, payload({ hook_event_name: 'beforeSubmitPrompt' })) + block(later + 2000, payload()));
+  const view = readCursorLocalSessions({ ...options, billingRows: [{ ...bill, eventTime: later + 1500 }] });
+  assert.equal(view.sessions.today['cursor:conversation'].tokenDataUnavailable, true);
+});
+
 for (const platform of ['win32', 'darwin', 'linux']) {
   test(`Cursor local details use the ${platform} desktop log layout`, t => {
     const { log, options } = fixture(t, platform);

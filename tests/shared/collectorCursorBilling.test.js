@@ -11,6 +11,26 @@ const ledger = rows => ({ version: 2, accountKey: billingAccountKey('user_test')
 const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
 const { normalizeDeviceRecord } = require('../../src/shared/usage');
 
+test('failed optional Cursor detail reads preserve accounting and other client details', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-detail-error-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  t.mock.method(cursorAuth, 'runCursorSync', async () => {});
+  t.mock.method(require('../../src/shared/providers/cursor/localSessions'), 'readCursorLocalSessions', () => {
+    throw new Error('Local metadata unavailable');
+  });
+  const sessions = { today: { 'reasonix:session': { totalTokens: 7 } }, month: {}, allTime: {} };
+  const projects = { today: {}, month: {}, allTime: {} };
+  const messages = [];
+  const result = await collectUsageOnce({ clients: 'cursor,reasonix', homeDir: dir, env: {},
+    now: new Date(2026, 9, 21, 12), osInfo: {}, wslScanEnabled: false, historyEnabled: false,
+    runTokscale: async () => ({ entries: [{ client: 'reasonix', model: 'test', totalTokens: 7 }] }),
+    reasonixNativeSessionsEnabled: true, reasonixNativeSessionCache: { getView: () => ({ sessions, projects }) },
+    logger: message => messages.push(message) });
+  assert.equal(result.today.totalTokens, 7);
+  assert.equal(result.nativeSessions.today['reasonix:session'].totalTokens, 7);
+  assert.ok(messages.some(message => message.includes('cursor local session scan failed: Local metadata unavailable')));
+});
+
 test('Cursor local session and project detail is attached without changing billing totals', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-detail-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

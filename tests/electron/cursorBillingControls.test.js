@@ -58,6 +58,54 @@ test('external-agent ownership blocks billing account management', () => {
   assert.equal(f.button('settings.cursor.billingDisconnect').disabled, true);
 });
 
+for (const connected of [false, true]) {
+  for (const rejects of [false, true]) {
+    test(`failed billing ${connected ? 'disconnect' : 'connect'} permits retry (${rejects ? 'rejection' : 'error result'})`, async () => {
+      const f = fixture({ connected });
+      const action = connected ? 'disconnectBilling' : 'connectBilling';
+      const label = connected ? 'settings.cursor.billingDisconnect' : 'settings.cursor.billingConnect';
+      f.context.window.tokenMonitor.cursor[action] = async () => {
+        if (rejects) throw new Error('Connection failed');
+        return { ok: false, error: 'Connection failed' };
+      };
+      f.context.renderCursorStatus();
+      const button = f.button(label);
+      const pending = button.listeners.click();
+      assert.equal(button.disabled, true);
+      await pending;
+      assert.equal(button.disabled, false, 'the existing error view must leave the action retryable');
+    });
+  }
+}
+
+test('Cursor logout finishes after billing storage cleanup fails', async () => {
+  const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
+  const start = main.indexOf("ipcMain.handle('cursor:logout'");
+  const body = main.slice(start, main.indexOf("  ipcMain.handle('opencode:logout'", start));
+  const calls = [];
+  let logout;
+  const context = {
+    ipcMain: { handle(_name, handler) { logout = handler; } },
+    isExternalAgentActive: () => false,
+    settings: { cursorManualAccountIds: ['work'], cursorDisabledAccountIds: ['work'], cursorBillingAccountIds: ['work'] },
+    normalizeCursorAccountIds: value => value, normalizeCursorDisabledAccountIds: value => value,
+    cursorAuth: { runCursorLogout: async () => { calls.push('logout'); } },
+    saveSettings: () => { calls.push('save'); }, session: {},
+    disconnectGrokBilling: async () => { throw new Error('Storage unavailable'); },
+    reconfigureUsageRuntimeForMode: () => { calls.push('usage'); },
+    deviceRuntimeHandle: { reconfigureLimits: () => { calls.push('limits'); } },
+    electronLimitsConfig: () => ({}), cursorStatusCache: { value: {}, at: 1 },
+    queueLimitInvalidation: () => { calls.push('invalidate'); },
+    bestEffortTrackedUsageRefresh: () => { calls.push('refresh'); },
+    cursorStatusValue: async () => ({ accounts: [] }), console: { log() {} }
+  };
+  vm.runInNewContext(body, context);
+  const result = await logout({}, 'work');
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ['logout', 'save', 'usage', 'limits', 'invalidate', 'refresh']);
+  assert.equal(context.cursorStatusCache.value, null);
+});
+
 test('startup only registers opted-in background polling and does not open a sign-in window', () => {
   const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
   const startup = main.slice(main.indexOf('app.whenReady().then('), main.indexOf('  syncLoginItemSettingFromOs();', main.indexOf('app.whenReady().then(')));

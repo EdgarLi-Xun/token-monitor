@@ -26,7 +26,7 @@ const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
 const tokenNumberAnimationApi = require('./tokenNumberAnimation');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
-const { billingItemsPath, billingStatus, disconnectGrokBilling, openGrokDashboardWindow,
+const { billingItemsPath, billingStatus, disconnectGrokBilling, ownsBillingWindow, openGrokDashboardWindow,
   refreshGrokBillingItems, startGrokBillingRefresh } = require('./grokDashboardBilling');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
@@ -7512,7 +7512,7 @@ function createWindow(boundsOverride, options = {}) {
   // last real window closes, which window-all-closed relies on for quitting.
   win.on('closed', () => {
     if (quitRequested || process.platform === 'darwin') return;
-    if (BrowserWindow.getAllWindows().every((other) => (edgeDockController?.owns(other) || notchController?.owns(other)))) app.quit();
+    if (BrowserWindow.getAllWindows().every((other) => (edgeDockController?.owns(other) || notchController?.owns(other) || ownsBillingWindow(other)))) app.quit();
   });
   win.on('show', () => sendMainWindowVisibility(win));
   win.on('hide', () => sendMainWindowVisibility(win));
@@ -8793,7 +8793,8 @@ app.whenReady().then(() => {
       settings.cursorDisabledAccountIds = disabled;
       settings.cursorManualAccountIds = [...manual].filter((id) => id !== removeId);
       saveSettings({ throwOnError: true });
-      const disconnected = disconnectGrokBilling({ session, accountId: removeId });
+      const disconnected = disconnectGrokBilling({ session, accountId: removeId })
+        .catch((error) => console.log(`[grok-dashboard] disconnect failed: ${error.message}`));
       reconfigureUsageRuntimeForMode();
       await disconnected;
       if (limitsChanged) {

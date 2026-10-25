@@ -7,9 +7,38 @@ const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { billingPartition, disconnectGrokBilling, fetchBillingItems, refreshGrokBillingItems,
-  billingItemsPath, openGrokDashboardWindow, startGrokBillingRefresh } = require('../../src/electron/grokDashboardBilling');
+  billingItemsPath, ownsBillingWindow, openGrokDashboardWindow, startGrokBillingRefresh } = require('../../src/electron/grokDashboardBilling');
 
 const ACCOUNT = { accountId: 'test-account', expectedEmail: 'owner@example.test' };
+
+test('closing the main window quits when only a hidden billing window remains', t => {
+  class Window extends EventEmitter {
+    constructor() { super(); this.webContents = new EventEmitter(); }
+    isDestroyed() { return false; }
+    loadURL() {}
+  }
+  const window = openGrokDashboardWindow({ BrowserWindow: Window, session: { fromPartition: () => ({}) },
+    ...ACCOUNT, userDataPath: '', show: false });
+  t.after(() => window.emit('closed'));
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = source.indexOf("  win.on('closed', () => {");
+  const handler = source.slice(start, source.indexOf('\n  });', start) + 6);
+  const vm = require('node:vm');
+  let closed;
+  let quit = 0;
+  vm.runInNewContext(handler, {
+    win: { on(_event, callback) { closed = callback; } }, quitRequested: false,
+    process: { platform: 'win32' }, app: { quit() { quit++; } },
+    BrowserWindow: { getAllWindows: () => [window] },
+    edgeDockController: null, notchController: null, ownsBillingWindow
+  });
+  closed();
+  assert.equal(quit, 1);
+  assert.equal(ownsBillingWindow(window), true);
+  window.emit('closed');
+  assert.equal(ownsBillingWindow(window), false);
+  assert.equal(ownsBillingWindow({}), false);
+});
 
 function item(id, product = 'cursor') {
   return {

@@ -37,6 +37,10 @@ function billingStatus(accountId) {
   return statuses.get(accountId) || 'notConnected';
 }
 
+function ownsBillingWindow(window) {
+  return [...loginWindows.values()].includes(window);
+}
+
 function setBillingStatus(accountId, status, onStatusChanged) {
   if (billingStatus(accountId) === status) return;
   statuses.set(accountId, status);
@@ -337,6 +341,7 @@ module.exports = {
   billingItemsPath,
   disconnectGrokBilling,
   fetchBillingItems,
+  ownsBillingWindow,
   openGrokDashboardWindow,
   refreshGrokBillingItems,
   startGrokBillingRefresh
