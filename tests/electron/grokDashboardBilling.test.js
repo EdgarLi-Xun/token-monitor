@@ -68,6 +68,75 @@ function item(id, product = 'cursor') {
   };
 }
 
+test('large history windows split without losing or duplicating boundary billing rows', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-large-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const start = Date.parse('2026-10-01T00:00:00Z');
+  const end = Date.parse('2026-10-22T00:00:00Z');
+  const middle = (start + end) / 2;
+  const times = Array.from({ length: 4500 }, (_, i) => start + 1000 + Math.floor((end - start - 2000) * i / 4500));
+  times.push(middle, middle + 500);
+  const items = times.map((time, i) => ({ ...item(`large-${i}`), eventTime: new Date(time).toISOString() }));
+  let calls = 0;
+  const count = await refreshGrokBillingItems({ ...ACCOUNT, userDataPath: dir,
+    session: { fromPartition: () => ({}) }, now: new Date('2026-10-21T12:00:00Z'),
+    fetchImpl: async url => {
+      calls++;
+      const from = Date.parse(url.searchParams.get('startTime'));
+      const to = Date.parse(url.searchParams.get('endTime'));
+      // Strict boundaries exercise the overlap used by split queries.
+      const rows = items.filter(row => Date.parse(row.eventTime) > from && Date.parse(row.eventTime) < to);
+      const offset = Number(url.searchParams.get('cursor') || 0);
+      const next = offset + 100;
+      return { ok: true, json: async () => ({ data: rows.slice(offset, next),
+        pagination: { hasMore: next < rows.length, nextCursor: next < rows.length ? String(next) : '' } }) };
+    }
+  });
+  const rows = JSON.parse(fs.readFileSync(billingItemsPath(dir, ACCOUNT.accountId))).rows;
+  assert.equal(count, 4502);
+  assert.equal(rows.length, 4502);
+  assert.equal(new Set(rows.map(row => row.id)).size, 4502);
+  assert.equal(rows.reduce((sum, row) => sum + row.totalTokens, 0), 45020);
+  assert.ok(calls > 40 && calls <= 160);
+});
+
+test('an incomplete split range preserves the whole ledger and reports a sync error', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-split-error-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { ...ACCOUNT, userDataPath: dir, session: { fromPartition: () => ({}) },
+    now: new Date('2026-10-21T12:00:00Z') };
+  await refreshGrokBillingItems({ ...options, fetchImpl: async () => ({ ok: true, json: async () => ({ data: [item('retained')] }) }) });
+  const file = billingItemsPath(dir, ACCOUNT.accountId);
+  const before = fs.readFileSync(file, 'utf8');
+  await assert.rejects(refreshGrokBillingItems({ ...options, fetchImpl: async url => {
+    const from = Date.parse(url.searchParams.get('startTime'));
+    const to = Date.parse(url.searchParams.get('endTime'));
+    const whole = to - from === 21 * 86400000;
+    const left = from === Date.parse('2026-10-01T00:00:00Z');
+    const page = Number(url.searchParams.get('cursor') || 0);
+    return { ok: true, json: async () => whole
+      ? { data: [], pagination: { hasMore: true, nextCursor: String(page + 1) } }
+      : left ? { data: [item('completed-left')] }
+        : { data: [item('incomplete-right')], pagination: { hasMore: true } } };
+  } }), { code: 'BILLING_PAGINATION_INCOMPLETE' });
+  assert.equal(fs.readFileSync(file, 'utf8'), before);
+  assert.equal(billingStatus(ACCOUNT.accountId), 'syncIncomplete');
+});
+
+test('split pagination keeps a total request budget and never mislabels it as sign-in failure', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-page-budget-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  let calls = 0;
+  await assert.rejects(refreshGrokBillingItems({ ...ACCOUNT, userDataPath: dir,
+    session: { fromPartition: () => ({}) }, now: new Date('2026-10-21T12:00:00Z'),
+    fetchImpl: async () => ({ ok: true, json: async () => ({ data: [],
+      pagination: { hasMore: true, nextCursor: `page-${++calls}` } }) })
+  }), { code: 'BILLING_PAGINATION_INCOMPLETE' });
+  assert.equal(calls, 160);
+  assert.equal(billingStatus(ACCOUNT.accountId), 'syncIncomplete');
+  assert.equal(fs.existsSync(billingItemsPath(dir, ACCOUNT.accountId)), false);
+});
+
 test('billing pagination continues across pages containing only other products', async () => {
   const pages = [
     { items: [item('grok', 'grok-chat')], nextPageToken: 'page-2' },

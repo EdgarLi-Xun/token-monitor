@@ -35,6 +35,7 @@ function fixture({ blocked = false, connected = false } = {}) {
     setCursorStatusText() {}, setCursorCheckboxesEnabled() {}, setSettingsSectionExpanded() {}, setCursorAccountExpanded() {},
     renderSettingsSummaries() {}, limitProviderPresentationApi: { limitProviderDisplayLabel: value => value }
   };
+  context.setAccountShellError = (id, message) => { context.accountShellErrors[id] = message || ''; };
   const body = app.slice(app.indexOf('function renderCursorStatus()'), app.indexOf('async function refreshCursorStatus('));
   vm.runInNewContext(`${body}\nrenderCursorStatus();`, context);
   const elements = node => [node, ...node.children.flatMap(elements)];
@@ -56,6 +57,27 @@ test('external-agent ownership blocks billing account management', () => {
   const f = fixture({ blocked: true, connected: true });
   assert.equal(f.button('settings.cursor.billingReconnect').disabled, true);
   assert.equal(f.button('settings.cursor.billingDisconnect').disabled, true);
+});
+
+test('billing action errors remain visible while account rows keep receiving status updates', async () => {
+  const f = fixture({ connected: true });
+  f.context.window.tokenMonitor.cursor.disconnectBilling = async () => ({ ok: false, error: 'Cleanup failed' });
+  f.context.renderCursorStatus();
+  await f.button('settings.cursor.billingDisconnect').listeners.click();
+  assert.equal(f.context.accountShellErrors.cursor, 'Cleanup failed');
+  assert.equal(f.context.state.cursorAccount.error || '', '');
+  const list = f.context.document.getElementById('cursorAccountList');
+  const before = list.children[0];
+  f.context.state.cursorAccount.status.accounts[0].billingStatus = 'storageLimit';
+  f.context.renderCursorStatus();
+  const texts = node => [node.textContent, ...node.children.flatMap(texts)];
+  assert.notEqual(list.children[0], before, 'the error must not freeze account rows');
+  assert.ok(texts(list).includes('settings.cursor.billingStatus.storageLimit'));
+  assert.equal(f.context.accountShellErrors.cursor, 'Cleanup failed');
+  f.context.window.tokenMonitor.cursor.disconnectBilling = async () => ({ ok: true, status: f.context.state.cursorAccount.status });
+  f.context.renderCursorStatus();
+  await f.button('settings.cursor.billingDisconnect').listeners.click();
+  assert.equal(f.context.accountShellErrors.cursor, '');
 });
 
 for (const connected of [false, true]) {

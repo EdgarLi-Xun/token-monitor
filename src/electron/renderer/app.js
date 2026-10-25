@@ -17527,10 +17527,13 @@ function renderCursorStatus() {
         button.disabled = true;
         try {
           const result = await action(account.id);
-          state.cursorAccount = result?.ok
-            ? { status: result.status, error: '', busy: false }
-            : { ...state.cursorAccount, error: result?.error || t('settings.common.error') };
-        } catch (error) { state.cursorAccount = { ...state.cursorAccount, error: error.message }; }
+          if (result?.ok) {
+            state.cursorAccount = { status: result.status, error: '', busy: false };
+            setAccountShellError('cursor', '');
+          } else {
+            setAccountShellError('cursor', result?.error || t('settings.common.error'));
+          }
+        } catch (error) { setAccountShellError('cursor', error.message); }
         finally { button.disabled = false; }
         renderCursorStatus();
       };

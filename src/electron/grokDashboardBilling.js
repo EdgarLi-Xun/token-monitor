@@ -19,6 +19,8 @@ const {
 const USAGE_PAGE = 'https://grok.com/dashboard/usage';
 const PAGE_SIZE = 100;
 const MAX_PAGES = 40;
+const MAX_REFRESH_PAGES = MAX_PAGES * 4;
+const MIN_SPLIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const STARTUP_RETRY_DELAYS_MS = [3000, 10000, 30000];
 const TODAY_REFRESH_MS = 30000;
 const HISTORY_REFRESH_MS = 10 * 60 * 1000;
@@ -110,13 +112,41 @@ function dashboardFetch(webContents) {
   };
 }
 
-async function fetchBillingItems(ses, { startTime, endTime, fetchImpl, expectedEmail } = {}) {
+function paginationError(rangeTooLarge = false) {
+  const error = new Error('Grok billing pagination did not finish; keeping the previous ledger');
+  error.code = 'BILLING_PAGINATION_INCOMPLETE';
+  error.rangeTooLarge = rangeTooLarge;
+  return error;
+}
+
+async function fetchBillingItems(ses, options = {}) {
+  return fetchBillingWindow(ses, options, { remaining: MAX_REFRESH_PAGES });
+}
+
+async function fetchBillingWindow(ses, options, budget) {
+  try {
+    return await fetchBillingRange(ses, options, budget);
+  } catch (error) {
+    const start = Date.parse(options.startTime);
+    const end = Date.parse(options.endTime);
+    if (error.code !== 'BILLING_PAGINATION_INCOMPLETE' || !error.rangeTooLarge || !(end - start > MIN_SPLIT_WINDOW_MS)) throw error;
+    const middle = Math.floor((start + end) / 2);
+    // Overlap queries to cover inclusive/exclusive API boundaries, then assign
+    // each observed timestamp to exactly one half. Never retain partial pages.
+    const left = await fetchBillingWindow(ses, { ...options, endTime: new Date(middle + 1000).toISOString() }, budget);
+    const right = await fetchBillingWindow(ses, { ...options, startTime: new Date(middle - 1000).toISOString() }, budget);
+    return [...left.filter(row => row.eventTime < middle), ...right.filter(row => row.eventTime >= middle)];
+  }
+}
+
+async function fetchBillingRange(ses, { startTime, endTime, fetchImpl, expectedEmail }, budget) {
   const fetch = fetchImpl || ses.fetch.bind(ses);
   const rows = [];
   const seen = new Set();
   const seenPages = new Set();
   let pageToken = '';
   for (let page = 0; page < MAX_PAGES; page += 1) {
+    if (budget.remaining-- <= 0) throw paginationError();
     const url = new URL(BILLING_ITEMS_URL);
     url.searchParams.set('scope', 'user');
     url.searchParams.set('startTime', startTime);
@@ -150,7 +180,7 @@ async function fetchBillingItems(ses, { startTime, endTime, fetchImpl, expectedE
     const batch = rowsFromBillingPayload(payload);
     const token = nextPageToken(payload);
     if (payload?.pagination?.hasMore === true && !token) {
-      throw new Error('Grok billing pagination did not finish; keeping the previous ledger');
+      throw paginationError();
     }
     for (const row of batch) {
       const key = billingRowKey(row);
@@ -159,9 +189,8 @@ async function fetchBillingItems(ses, { startTime, endTime, fetchImpl, expectedE
       rows.push(row);
     }
     if (!token) break;
-    if (seenPages.has(token) || page === MAX_PAGES - 1) {
-      throw new Error('Grok billing pagination did not finish; keeping the previous ledger');
-    }
+    if (seenPages.has(token)) throw paginationError();
+    if (page === MAX_PAGES - 1) throw paginationError(true);
     seenPages.add(token);
     pageToken = token;
   }
@@ -183,7 +212,8 @@ function refreshGrokBillingItems(options = {}) {
   }).catch(error => {
     if (isCurrent()) setBillingStatus(options.accountId,
       error.code === 'BILLING_ACCOUNT_MISMATCH' ? 'accountMismatch'
-        : error.code === 'PRIVATE_JSON_TOO_LARGE' ? 'storageLimit' : 'signInRequired', options.onStatusChanged);
+        : error.code === 'PRIVATE_JSON_TOO_LARGE' ? 'storageLimit'
+          : error.code === 'BILLING_PAGINATION_INCOMPLETE' ? 'syncIncomplete' : 'signInRequired', options.onStatusChanged);
     throw error;
   });
 }
