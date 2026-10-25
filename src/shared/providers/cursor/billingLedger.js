@@ -8,6 +8,8 @@ const { cursorCacheDir } = require('./usageEvents');
 const { normalizeTokscaleModelNameForClient } = require('../../history');
 const { readRegularFileNoFollow } = require('../../credentialStore');
 
+const BILLING_LEDGER_MAX_BYTES = 64 * 1024 * 1024;
+
 function billingAccountKey(accountId) {
   const id = String(accountId || '').trim();
   if (!id || id.length > 256) throw new Error('Cursor account is required for billing recovery');
@@ -38,7 +40,7 @@ function normalizeBillingRow(row) {
 
 function readBillingRows(filePath, accountId) {
   try {
-    const stored = JSON.parse(readRegularFileNoFollow(filePath, { maxBytes: 64 * 1024 * 1024 }));
+    const stored = JSON.parse(readRegularFileNoFollow(filePath, { maxBytes: BILLING_LEDGER_MAX_BYTES }));
     if (stored.version !== 2 || stored.accountKey !== billingAccountKey(accountId) || !Array.isArray(stored.rows)) return [];
     const identityHash = /^[0-9a-f]{64}$/.test(stored.identityHash || '') ? stored.identityHash : '';
     return stored.rows.map(normalizeBillingRow).filter(Boolean)
@@ -140,5 +142,5 @@ function reconcileBillingRows(rows, native) {
   return result;
 }
 
-module.exports = { billingAccountKey, billingIdentityHash, billingItemsPath, billingNativeSnapshot, nativeAccountRows,
+module.exports = { BILLING_LEDGER_MAX_BYTES, billingAccountKey, billingIdentityHash, billingItemsPath, billingNativeSnapshot, nativeAccountRows,
   normalizeBillingRow, readBillingRows, reconcileBillingRows };

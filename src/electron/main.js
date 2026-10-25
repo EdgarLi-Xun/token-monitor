@@ -8733,7 +8733,8 @@ app.whenReady().then(() => {
       if (!cursorAuth.listAccounts().some(account => account.id === id)) throw new Error('Cursor account not found');
       settings.cursorBillingAccountIds = normalizeCursorAccountIds(settings.cursorBillingAccountIds).filter(value => value !== id);
       saveSettings({ throwOnError: true });
-      const disconnected = disconnectGrokBilling({ session, accountId: id });
+      const disconnected = disconnectGrokBilling({ session, accountId: id })
+        .catch((error) => console.log(`[grok-dashboard] disconnect failed: ${error.message}`));
       reconfigureUsageRuntimeForMode();
       await disconnected;
       cursorStatusCache = { value: null, at: 0 };

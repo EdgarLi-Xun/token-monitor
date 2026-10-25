@@ -23,6 +23,8 @@ Only accounts added manually by Token Monitor may be removed from its UI. Deskto
 
 ## Self-sync and sessions
 
+Billing ledgers retain all downloaded history in compact JSON. Writes use the same 64 MiB ceiling as reads and reject an oversized replacement before changing the saved file. Settings then reports the storage limit, and the last readable ledger continues supplying totals and History; no old rows are pruned to admit new ones. A later update that fits can succeed normally. This capacity policy prevents growth from making an entire ledger unreadable, but does not provide unlimited billing retention.
+
 Cursor is self-synced: the collector supplies its one `SelfSyncThrottle` and tokscale resolver to `createCursorSelfSync()`. A credential change forces one targeted Cursor usage sync but does not restart the usage runtime.
 
 Cursor's old CSV usage names Auto as `auto`; its JSON usage events name the same mode `default`. Token Monitor groups both under `cursor-auto` in usage, History graph, old device periods, and archived session/client/day replay. Keep this mapping scoped to Cursor because other clients may use `default` for a different model. A persisted Cursor collector anchor from before this mapping must be rescanned once so its broader periods cannot mix old and new model keys.

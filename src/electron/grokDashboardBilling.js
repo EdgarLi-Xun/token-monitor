@@ -8,7 +8,7 @@
 
 const fs = require('node:fs');
 const { readRegularFileNoFollow, writePrivateJsonAtomic } = require('../shared/credentialStore');
-const { billingAccountKey, billingIdentityHash, billingItemsPath, normalizeBillingRow, readBillingRows } = require('../shared/providers/cursor/billingLedger');
+const { BILLING_LEDGER_MAX_BYTES, billingAccountKey, billingIdentityHash, billingItemsPath, normalizeBillingRow, readBillingRows } = require('../shared/providers/cursor/billingLedger');
 const {
   BILLING_ITEMS_URL,
   billingRowKey,
@@ -51,14 +51,14 @@ function dashboardSession(session, accountId) {
   return session.fromPartition(billingPartition(accountId));
 }
 
-function writeRows(filePath, rows, accountId, email) {
+function writeRows(filePath, rows, accountId, email, maxBytes = BILLING_LEDGER_MAX_BYTES) {
   // The API query is a rolling window. Preserve older downloaded billing rows
   // in this ledger so they do not disappear from Month/Total and History.
   const previous = readBillingRows(filePath, accountId).map(normalizeBillingRow);
   const identityHash = billingIdentityHash(email);
   let identityChanged = false;
   if (fs.existsSync(filePath)) {
-    const stored = JSON.parse(readRegularFileNoFollow(filePath, { maxBytes: 64 * 1024 * 1024 }));
+    const stored = JSON.parse(readRegularFileNoFollow(filePath, { maxBytes: BILLING_LEDGER_MAX_BYTES }));
     identityChanged = stored.identityHash !== identityHash;
     if (stored.version !== 2 || stored.accountKey !== billingAccountKey(accountId) || !Array.isArray(stored.rows)
       || stored.rows.some(row => !normalizeBillingRow(row))) {
@@ -75,7 +75,10 @@ function writeRows(filePath, rows, accountId, email) {
     merged.set(key, row);
   }
   writePrivateJsonAtomic(filePath, { version: 2, accountKey: billingAccountKey(accountId), identityHash,
-    fetchedAt: new Date().toISOString(), rows: [...merged.values()].map(normalizeBillingRow).filter(Boolean) });
+    fetchedAt: new Date().toISOString(), rows: [...merged.values()].map(normalizeBillingRow).filter(Boolean) }, {
+    compact: true,
+    maxBytes: Number.isFinite(maxBytes) ? Math.max(0, Math.min(BILLING_LEDGER_MAX_BYTES, Math.floor(maxBytes))) : BILLING_LEDGER_MAX_BYTES
+  });
   return changed;
 }
 
@@ -179,13 +182,14 @@ function refreshGrokBillingItems(options = {}) {
     return count;
   }).catch(error => {
     if (isCurrent()) setBillingStatus(options.accountId,
-      error.code === 'BILLING_ACCOUNT_MISMATCH' ? 'accountMismatch' : 'signInRequired', options.onStatusChanged);
+      error.code === 'BILLING_ACCOUNT_MISMATCH' ? 'accountMismatch'
+        : error.code === 'PRIVATE_JSON_TOO_LARGE' ? 'storageLimit' : 'signInRequired', options.onStatusChanged);
     throw error;
   });
 }
 
 async function downloadBillingItems({ session, userDataPath, accountId, expectedEmail,
-  now = new Date(), todayOnly = false, logger, fetchImpl, webContents, isCurrent, onStatusChanged } = {}) {
+  now = new Date(), todayOnly = false, logger, fetchImpl, webContents, isCurrent, onStatusChanged, maxLedgerBytes } = {}) {
   if (!expectedEmail?.trim()) throw new Error('Verify the Cursor account before connecting billing recovery');
   if (!isCurrent()) throw new Error('Cursor billing connection changed during refresh');
   const ses = dashboardSession(session, accountId);
@@ -208,7 +212,7 @@ async function downloadBillingItems({ session, userDataPath, accountId, expected
     fetchImpl: fetchImpl || dashboardFetch(webContents || loginWindows.get(accountId)?.webContents)
   });
   if (!isCurrent()) throw new Error('Cursor billing connection changed during refresh');
-  const changed = writeRows(billingItemsPath(userDataPath, accountId), rows, accountId, expectedEmail);
+  const changed = writeRows(billingItemsPath(userDataPath, accountId), rows, accountId, expectedEmail, maxLedgerBytes);
   setBillingStatus(accountId, 'connected', onStatusChanged);
   if (typeof logger === 'function') logger(`grok billing items stored ${rows.length} cursor rows`);
   return { count: rows.length, changed };

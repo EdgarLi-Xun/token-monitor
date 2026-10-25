@@ -6,10 +6,31 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
-const { billingPartition, disconnectGrokBilling, fetchBillingItems, refreshGrokBillingItems,
+const { billingPartition, billingStatus, disconnectGrokBilling, fetchBillingItems, refreshGrokBillingItems,
   billingItemsPath, ownsBillingWindow, openGrokDashboardWindow, startGrokBillingRefresh } = require('../../src/electron/grokDashboardBilling');
 
 const ACCOUNT = { accountId: 'test-account', expectedEmail: 'owner@example.test' };
+
+test('a full billing ledger preserves readable history and reports its storage limit', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-grok-ledger-limit-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { ...ACCOUNT, userDataPath: dir, session: { fromPartition: () => ({}) }, maxLedgerBytes: 1024 };
+  const fetchRows = rows => async () => ({ ok: true, json: async () => ({ data: rows }) });
+  await refreshGrokBillingItems({ ...options, fetchImpl: fetchRows([item('retained')]) });
+  const file = billingItemsPath(dir, ACCOUNT.accountId);
+  const before = fs.readFileSync(file, 'utf8');
+  assert.ok(Buffer.byteLength(before) <= options.maxLedgerBytes);
+  await assert.rejects(refreshGrokBillingItems({ ...options, fetchImpl: fetchRows([item('界'.repeat(500))]) }),
+    { code: 'PRIVATE_JSON_TOO_LARGE' });
+  assert.equal(fs.readFileSync(file, 'utf8'), before);
+  const rows = require('../../src/shared/providers/cursor/billingLedger').readBillingRows(file, ACCOUNT.accountId);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].totalTokens, 10, 'previous accounting and History inputs remain readable');
+  assert.equal(billingStatus(ACCOUNT.accountId), 'storageLimit');
+  await refreshGrokBillingItems({ ...options, fetchImpl: fetchRows([item('another-small-row')]) });
+  assert.equal(billingStatus(ACCOUNT.accountId), 'connected');
+  assert.equal(JSON.parse(fs.readFileSync(file)).rows.length, 2);
+});
 
 test('closing the main window quits when only a hidden billing window remains', t => {
   class Window extends EventEmitter {

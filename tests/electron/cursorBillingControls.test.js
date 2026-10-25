@@ -106,6 +106,32 @@ test('Cursor logout finishes after billing storage cleanup fails', async () => {
   assert.equal(context.cursorStatusCache.value, null);
 });
 
+for (const reconfigureFails of [false, true]) {
+  test(`billing disconnect handles failed storage cleanup before reconfiguration (${reconfigureFails ? 'throws' : 'succeeds'})`, async () => {
+    const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
+    const start = main.indexOf("ipcMain.handle('cursor:disconnectBilling'");
+    const body = main.slice(start, main.indexOf("  ipcMain.handle('limits:saveCredential'", start));
+    let disconnect;
+    const context = {
+      ipcMain: { handle(_name, handler) { disconnect = handler; } },
+      ownsUsageRuntime: () => true, isExternalAgentActive: () => false,
+      cursorAuth: { listAccounts: () => [{ id: 'work' }] },
+      settings: { cursorBillingAccountIds: ['work'] }, normalizeCursorAccountIds: value => value,
+      saveSettings() {}, session: {},
+      disconnectGrokBilling: async () => { throw new Error('Storage unavailable'); },
+      reconfigureUsageRuntimeForMode() { if (reconfigureFails) throw new Error('Reconfiguration failed'); },
+      cursorStatusCache: { value: {}, at: 1 },
+      cursorStatusValue: async () => ({ accounts: [] }), console: { log() {} }
+    };
+    vm.runInNewContext(body, context);
+    const result = await disconnect({}, 'work');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(result.ok, !reconfigureFails);
+    assert.equal(context.settings.cursorBillingAccountIds.length, 0);
+    if (!reconfigureFails) assert.equal(context.cursorStatusCache.value, null);
+  });
+}
+
 test('startup only registers opted-in background polling and does not open a sign-in window', () => {
   const main = fs.readFileSync(path.join(root, 'main.js'), 'utf8');
   const startup = main.slice(main.indexOf('app.whenReady().then('), main.indexOf('  syncLoginItemSettingFromOs();', main.indexOf('app.whenReady().then(')));
