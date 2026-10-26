@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const { cursorDesktopStateCandidates } = require('./desktopState');
 const { resolveSessionMetadata } = require('./sessionMetadata');
 const { normalizeTokscaleModelNameForClient } = require('../../history');
@@ -222,4 +223,21 @@ function readCursorLocalSessions(options = {}) {
   return view;
 }
 
-module.exports = { parseHookLog, readCursorLocalSessions };
+function readCursorLocalTurnUsage(options = {}) {
+  const now = +new Date(options.now || Date.now());
+  const rows = new Map();
+  const conflicts = new Set();
+  for (const turn of turnsFromEvents(readEvents(options), now)) {
+    const id = createHash('sha256').update(JSON.stringify([turn.row.sessionId, turn.row.requestId])).digest('hex');
+    const usage = localTurnUsage(turn);
+    if (turn.start?.accountHash && turn.stop?.accountHash && turn.start.accountHash !== turn.stop.accountHash) conflicts.add(id);
+    if (!usage || usage.totalTokens <= 0) continue;
+    const row = { id, model: 'unknown', ...usage };
+    const previous = rows.get(id);
+    if (previous && ['totalTokens', ...tokenKeys].some(key => previous[key] !== row[key])) conflicts.add(id);
+    else if (!previous || row.eventTime < previous.eventTime) rows.set(id, row);
+  }
+  return { rows: [...rows.values()].filter(row => !conflicts.has(row.id)), conflicts: [...conflicts] };
+}
+
+module.exports = { parseHookLog, readCursorLocalSessions, readCursorLocalTurnUsage };

@@ -1050,9 +1050,11 @@ async function collectUsageOnce(options) {
     });
     throwIfAborted(options.signal);
     throwIfAborted(options.signal);
-    if (trackedClientSet.has('cursor') && options.cursorBillingAccounts?.length) {
-      cursorBillingNativeState = require('./providers/cursor/billingLedger').billingNativeSnapshot(
-        options.cursorBillingAccounts, collectedAt, { homeDir: options.homeDir, env: options.env });
+    if (trackedClientSet.has('cursor')) {
+      cursorBillingNativeState = options.cursorBillingAccounts?.length
+        ? require('./providers/cursor/billingLedger').billingNativeSnapshot(
+          options.cursorBillingAccounts, collectedAt, { homeDir: options.homeDir, env: options.env })
+        : require('./providers/cursor/localUsage').localNativeCoverage({ ...options, now: collectedAt });
       cursorBillingNativeChanged = anchorUsed && anchor.cursorBillingNativeSignature !== cursorBillingNativeState.signature;
       if (cursorBillingNativeChanged) {
         anchorUsed = false;
@@ -1270,11 +1272,19 @@ async function collectUsageOnce(options) {
     }
   }
 
-  // Billing is an independent ledger. Re-project it on every tick, including
+  // Cursor supplements are independent ledgers. Re-project them on every tick, including
   // other clients' watch ticks and late historical backfills, without putting
   // it in native delta anchors or generic history retention.
   const cursorBillingRows = trackedClientSet.has('cursor')
     ? loadCursorBillingRows({ ...options, now: collectedAt, cursorBillingNativeState }) : [];
+  let cursorLocalUsageChanged = false;
+  const cursorLocalRows = trackedClientSet.has('cursor')
+    ? require('./providers/cursor/localUsage').readCursorLocalUsage({ ...options, now: collectedAt,
+      coverage: options.cursorBillingAccounts?.length ? undefined : cursorBillingNativeState,
+      onCursorLocalUsageChanged: () => { cursorLocalUsageChanged = true; },
+      nativeCoverageUnknown: !cursorBillingNativeState?.days?.size && [today, month, allTime].some(period => period.clients?.cursor > 0)
+    }) : [];
+  const cursorSupplementRows = [...cursorBillingRows, ...cursorLocalRows];
   let cursorBillingPricing = {};
   if (cursorBillingRows.length) {
     try {
@@ -1289,8 +1299,8 @@ async function collectUsageOnce(options) {
   }
   const cursorBillingView = supplementCursorBilling({
     mode: 'full', today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod()
-  }, cursorBillingRows, collectedAt, cursorBillingPricing);
-  if (cursorBillingRows.length) {
+  }, cursorSupplementRows, collectedAt, cursorBillingPricing);
+  if (cursorSupplementRows.length) {
     today = mergePeriods(today, cursorBillingView.today);
     month = mergePeriods(month, cursorBillingView.month);
     allTime = mergePeriods(allTime, cursorBillingView.allTime);
@@ -1435,12 +1445,12 @@ async function collectUsageOnce(options) {
   }
   if (options.historyEnabled === false) {
     summary.history = null;
-  } else if (options.includeHistory || cursorBillingNativeChanged) {
+  } else if (options.includeHistory || cursorBillingNativeChanged || cursorLocalUsageChanged) {
     throwIfAborted(options.signal);
     const history = await collectHistoryOnce({
       clients: normalizedClients,
       codexLocalGraph: codexLocalView?.graph || null,
-      cursorBillingGraph: cursorBillingRows.length ? billingHistoryGraph(cursorBillingRows, cursorBillingPricing) : null,
+      cursorBillingGraph: cursorSupplementRows.length ? billingHistoryGraph(cursorSupplementRows, cursorBillingPricing) : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,

@@ -31,7 +31,7 @@ test('failed optional Cursor detail reads preserve accounting and other client d
   assert.ok(messages.some(message => message.includes('cursor local session scan failed: Local metadata unavailable')));
 });
 
-test('Cursor local session and project detail is attached without changing billing totals', async t => {
+test('Cursor local turns fill missing accounting while connected billing retains precedence', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-detail-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   t.mock.method(cursorAuth, 'runCursorSync', async () => {});
@@ -61,11 +61,13 @@ test('Cursor local session and project detail is attached without changing billi
   assert.equal(direct.nativeSessions?.today['cursor:conversation']?.totalTokens, 35,
     'local Cursor details must not depend on connecting Grok billing');
   assert.equal(Object.values(direct.nativeProjects.today)[0].tokens, 35);
-  assert.equal(direct.today.totalTokens, 0, 'local details stay outside account accounting');
+  assert.equal(direct.today.totalTokens, 35, 'complete local turns must fill missing native usage without Grok');
+  assert.equal(direct.today.models.unknown, 35, 'the selected model does not establish billing attribution');
+  assert.equal(direct.today.unpricedTokens, 35);
   const wire = normalizeDeviceRecord(direct);
   assert.equal(wire.nativeSessions, undefined);
   assert.equal(wire.nativeProjects, undefined);
-  assert.equal(wire.periods.today.totalTokens, 0);
+  assert.equal(wire.periods.today.totalTokens, 35);
   const project = Object.values(result.nativeProjects.today)[0];
   for (const billingRows of [JSON.parse(fs.readFileSync(billingPath)).rows, []]) {
     fs.writeFileSync(billingPath, JSON.stringify(ledger(billingRows)));
