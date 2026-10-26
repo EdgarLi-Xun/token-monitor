@@ -135,7 +135,7 @@ for (const reconfigureFails of [false, true]) {
     const body = main.slice(start, main.indexOf("  ipcMain.handle('limits:saveCredential'", start));
     let disconnect;
     const context = {
-      ipcMain: { handle(_name, handler) { disconnect = handler; } },
+      ipcMain: { handle(name, handler) { if (name === 'cursor:disconnectBilling') disconnect = handler; } },
       ownsUsageRuntime: () => true, isExternalAgentActive: () => false,
       cursorAuth: { listAccounts: () => [{ id: 'work' }] },
       settings: { cursorBillingAccountIds: ['work'] }, normalizeCursorAccountIds: value => value,
