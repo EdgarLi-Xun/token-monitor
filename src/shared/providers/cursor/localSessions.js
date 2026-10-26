@@ -178,10 +178,13 @@ function readCursorLocalSessions(options = {}) {
   const turns = turnsFromEvents(readEvents(options), +now);
   const billingRows = options.billingRows || [];
   const localRows = new Map((options.localRows || []).map(row => [row.id, row]));
+  const localConflicts = new Set(options.localConflicts || []);
   matchBilling(turns, billingRows);
   for (const turn of turns) {
+    const id = turnIdentity(turn);
+    if (localConflicts.has(id)) { turn.usage = []; continue; }
     const usage = localTurnUsage(turn);
-    const observed = localRows.get(turnIdentity(turn));
+    const observed = localRows.get(id);
     const local = observed && usage && ['totalTokens', ...tokenKeys].every(key => usage[key] === observed[key]) ? observed : usage;
     turn.usage = billingRows.length ? turn.bills : [local].filter(Boolean);
   }

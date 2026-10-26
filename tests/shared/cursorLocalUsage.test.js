@@ -131,6 +131,51 @@ test('conflicting counters retire a prior observation durably', t => {
   assert.equal(JSON.parse(fs.readFileSync(f.file)).conflicts.length, 1);
 });
 
+test('persisted counter conflicts keep local session and project details unavailable after rotation', async t => {
+  const f = fixture(t);
+  const model = { model_id: 'grok-4.6', model_params: [{ id: 'fast', value: 'false' }] };
+  f.hooks(f.time(26), model);
+  f.hooks(f.time(26) + 5000, { ...model, conversation_id: 'accepted-session', generation_id: 'accepted',
+    workspace_roots: ['/accepted/project'] });
+  t.mock.method(cursorAuth, 'runCursorSync', async () => {});
+  const options = { ...f.options, clients: 'cursor', deviceId: 'test', osInfo: {},
+    wslScanEnabled: false, projectsEnabled: true, includeHistory: true,
+    runTokscale: async () => ({ entries: [] }), runGraph: async () => ({ contributions: [] }),
+    pricingRevision: 'local-conflict-regression', lookupModelPricing: async () => ({
+      resolution: { exactModelIdentity: true, stripped: false },
+      pricing: { inputCostPerToken: 2e-6, outputCostPerToken: 6e-6, cacheReadInputTokenCost: 5e-7 }
+    }) };
+  const first = await collectUsageOnce(options);
+  assert.equal(first.today.clients.cursor, 70);
+  const rejectedProject = first.nativeSessions.today['cursor:session'].projectId;
+  const acceptedProject = first.nativeSessions.today['cursor:accepted-session'].projectId;
+  const conflictingLog = f.log.replace('20261026T090000', '20261026T100000');
+  f.hooks(f.time(26) + 10000, { ...model, output_tokens: 6 }, conflictingLog);
+  for (const rotated of [false, true]) {
+    if (rotated) fs.unlinkSync(conflictingLog);
+    const result = await collectUsageOnce(options);
+    assert.equal(result.history.summary.totalTokens, 35);
+    for (const period of ['today', 'month', 'allTime']) {
+      assert.equal(result[period].clients.cursor, 35, 'accepted accounting remains unchanged');
+      const rejected = result.nativeSessions[period]['cursor:session'];
+      assert.equal(rejected.tokenDataUnavailable, true, 'rejected generations must not fall back to hook counters');
+      assert.equal(rejected.totalTokens, 0);
+      assert.deepEqual(rejected.models, {});
+      assert.equal(rejected.cursorEstimatedCostUsd, undefined);
+      const project = result.nativeProjects[period][rejectedProject];
+      assert.equal(project.tokenDataUnavailable, true);
+      assert.equal(project.tokens, 0);
+      assert.equal(project.cursorEstimatedCostUsd, undefined);
+      const accepted = result.nativeSessions[period]['cursor:accepted-session'];
+      assert.equal(accepted.totalTokens, 35);
+      assert.equal(accepted.tokenDataUnavailable, false);
+      assert.ok(accepted.cursorEstimatedCostUsd > 0);
+      assert.equal(result.nativeProjects[period][acceptedProject].tokens, 35);
+    }
+    assert.equal(JSON.parse(fs.readFileSync(f.file)).conflicts.length, 1);
+  }
+});
+
 test('missing or conflicting ownership never produces an accounting observation', t => {
   const f = fixture(t); f.hooks(f.time(26), { user_email: '' });
   assert.equal(readCursorLocalUsage(f.options).length, 0);

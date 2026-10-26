@@ -94,6 +94,9 @@ function readCursorLocalUsage(options = {}) {
   const next = { version: 2, rows: [...rows.values()].sort((a, b) => a.id.localeCompare(b.id)), conflicts: [...conflicts].sort() };
   const changed = JSON.stringify(saved) !== JSON.stringify(next);
   if (changed) writePrivateJsonAtomic(file, next, { compact: true, maxBytes: MAX_BYTES });
+  // Details must honor durable rejections even when coverage or billing
+  // precedence withholds this ledger's accounting rows for the current tick.
+  options.onCursorLocalUsageConflicts?.(next.conflicts);
   if (options.cursorBillingAccounts?.length) return [];
   const coverage = options.coverage || localNativeCoverage(options);
   const now = +new Date(options.now || Date.now());

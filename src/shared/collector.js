@@ -1278,10 +1278,12 @@ async function collectUsageOnce(options) {
   const cursorBillingRows = trackedClientSet.has('cursor')
     ? loadCursorBillingRows({ ...options, now: collectedAt, cursorBillingNativeState }) : [];
   let cursorLocalUsageChanged = false;
+  let cursorLocalConflicts = [];
   const cursorLocalRows = trackedClientSet.has('cursor')
     ? require('./providers/cursor/localUsage').readCursorLocalUsage({ ...options, now: collectedAt,
       coverage: options.cursorBillingAccounts?.length ? undefined : cursorBillingNativeState,
       onCursorLocalUsageChanged: () => { cursorLocalUsageChanged = true; },
+      onCursorLocalUsageConflicts: conflicts => { cursorLocalConflicts = conflicts; },
       nativeCoverageUnknown: !cursorBillingNativeState?.days?.size && [today, month, allTime].some(period => period.clients?.cursor > 0)
     }) : [];
   const cursorSupplementRows = [...cursorBillingRows, ...cursorLocalRows];
@@ -1405,7 +1407,7 @@ async function collectUsageOnce(options) {
       const cursorView = require('./providers/cursor/localSessions').readCursorLocalSessions({
         homeDir: options.homeDir, env: options.env, platform: platformValue, now: collectedAt,
         allTimeSince, projectsEnabled, projectIdentity, billingRows: cursorBillingRows,
-        localRows: cursorLocalRows, pricingByModel: cursorBillingPricing,
+        localRows: cursorLocalRows, localConflicts: cursorLocalConflicts, pricingByModel: cursorBillingPricing,
         periods: { today, month, allTime }
       });
       for (const [field, values] of [['nativeSessions', cursorView.sessions], ['nativeProjects', cursorView.projects]]) {
