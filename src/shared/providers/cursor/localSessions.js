@@ -8,9 +8,12 @@ const { cursorDesktopStateCandidates } = require('./desktopState');
 const { resolveSessionMetadata } = require('./sessionMetadata');
 const { normalizeTokscaleModelNameForClient } = require('../../history');
 const { billingIdentityHash } = require('./billingLedger');
+const { hookModelSelection, turnModelEvidence, mergeModelEvidence } = require('./localModels');
+const { pricedBillingEntry } = require('./billingItems');
 
 const logCache = new Map();
 const tokenKeys = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'];
+const turnIdentity = turn => createHash('sha256').update(JSON.stringify([turn.row.sessionId, turn.row.requestId])).digest('hex');
 
 // These are existing Cursor output logs, not installed hooks. Keep only the
 // scalar projection: hook inputs can contain prompts, transcripts and emails.
@@ -32,10 +35,12 @@ function parseHookLog(source) {
       ? roots[0].replace(/^\/([a-z]:\/)/i, '$1') : '';
     const counters = [input.input_tokens, input.output_tokens, input.cache_read_tokens, input.cache_write_tokens];
     const valid = counters.every(value => Number.isSafeInteger(value) && value >= 0);
+    const modelSelection = hookModelSelection(input);
     rows.push({ time, sessionId, requestId, projectPath,
       accountHash: billingIdentityHash(input.user_email),
       event: input.hook_event_name,
       model: normalizeTokscaleModelNameForClient(input.model || input.model_id || '', 'cursor'),
+      ...(modelSelection ? { modelSelection } : {}),
       ...(valid ? { counters } : {}) });
   }
   return rows;
@@ -172,9 +177,13 @@ function readCursorLocalSessions(options = {}) {
   const view = { sessions: { today: {}, month: {}, allTime: {} }, projects: { today: {}, month: {}, allTime: {} } };
   const turns = turnsFromEvents(readEvents(options), +now);
   const billingRows = options.billingRows || [];
+  const localRows = new Map((options.localRows || []).map(row => [row.id, row]));
   matchBilling(turns, billingRows);
   for (const turn of turns) {
-    turn.usage = billingRows.length ? turn.bills : [localTurnUsage(turn)].filter(Boolean);
+    const usage = localTurnUsage(turn);
+    const observed = localRows.get(turnIdentity(turn));
+    const local = observed && usage && ['totalTokens', ...tokenKeys].every(key => usage[key] === observed[key]) ? observed : usage;
+    turn.usage = billingRows.length ? turn.bills : [local].filter(Boolean);
   }
   const ids = new Set(turns.filter(turn => turn.row.time >= since).map(turn => turn.row.sessionId));
   const metadata = options.metadata || resolveSessionMetadata(ids, { home: options.homeDir,
@@ -201,7 +210,13 @@ function readCursorLocalSessions(options = {}) {
         tokenDataUnavailable: unknown || !bills.length, models: {},
         ...(latest.event === 'stop' ? { turnEnded: true } : {}),
         sessionDetailAvailable: false };
-      if (session.totalTokens > 0) session.unpricedTokens = session.totalTokens;
+      if (!unknown) {
+        const priced = bills.map(row => pricedBillingEntry(row, options.pricingByModel));
+        const missing = priced.reduce((sum, row) => sum + (row.unpricedTokens || 0), 0);
+        const cost = priced.reduce((sum, row) => sum + row.cost, 0);
+        if (missing > 0) session.unpricedTokens = missing;
+        if (cost > 0) session.cursorEstimatedCostUsd = cost;
+      }
       for (const token of tokenKeys) session[token] = unknown ? 0 : bills.reduce((sum, row) => sum + row[token], 0);
       if (!unknown) for (const row of bills) {
         if (row.model) session.models[row.model] = (session.models[row.model] || 0) + row.totalTokens;
@@ -214,6 +229,7 @@ function readCursorLocalSessions(options = {}) {
       const project = view.projects[name][session.projectId] ||= { projectId: session.projectId, label: session.projectLabel,
         tokens: 0, clients: {}, models: {}, tokenDataUnavailable: false };
       project.tokens += session.totalTokens;
+      if (session.cursorEstimatedCostUsd) project.cursorEstimatedCostUsd = (project.cursorEstimatedCostUsd || 0) + session.cursorEstimatedCostUsd;
       if (session.unpricedTokens) project.unpricedTokens = (project.unpricedTokens || 0) + session.unpricedTokens;
       project.clients.cursor = (project.clients.cursor || 0) + session.totalTokens;
       project.tokenDataUnavailable ||= session.tokenDataUnavailable;
@@ -228,14 +244,15 @@ function readCursorLocalTurnUsage(options = {}) {
   const rows = new Map();
   const conflicts = new Set();
   for (const turn of turnsFromEvents(readEvents(options), now)) {
-    const id = createHash('sha256').update(JSON.stringify([turn.row.sessionId, turn.row.requestId])).digest('hex');
+    const id = turnIdentity(turn);
     const usage = localTurnUsage(turn);
     if (turn.start?.accountHash && turn.stop?.accountHash && turn.start.accountHash !== turn.stop.accountHash) conflicts.add(id);
     if (!usage || usage.totalTokens <= 0) continue;
-    const row = { id, model: 'unknown', ...usage };
+    const row = { id, ...turnModelEvidence(turn), ...usage };
     const previous = rows.get(id);
     if (previous && ['totalTokens', ...tokenKeys].some(key => previous[key] !== row[key])) conflicts.add(id);
-    else if (!previous || row.eventTime < previous.eventTime) rows.set(id, row);
+    else rows.set(id, { ...row, eventTime: Math.min(previous?.eventTime || row.eventTime, row.eventTime),
+      ...mergeModelEvidence(previous, row) });
   }
   return { rows: [...rows.values()].filter(row => !conflicts.has(row.id)), conflicts: [...conflicts] };
 }

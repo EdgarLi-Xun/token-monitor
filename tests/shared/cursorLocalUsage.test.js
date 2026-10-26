@@ -52,11 +52,73 @@ test('complete local turns persist exact input plus output without prompts, owne
   assert.equal(fs.readFileSync(f.file, 'utf8'), saved, 'unchanged ticks do not rewrite the ledger');
 });
 
+test('structured local model evidence fills the model and catalog estimate without Grok', async t => {
+  const f = fixture(t);
+  f.hooks(f.time(26), { model: 'cursor-grok-4.6-high', model_id: 'grok-4.6',
+    model_params: [{ id: 'effort', value: 'high' }, { id: 'fast', value: 'false' }],
+    input_tokens: 277246, output_tokens: 124, cache_read_tokens: 267008 });
+  assert.equal(readCursorLocalUsage(f.options)[0].model, 'grok-4.6');
+  t.mock.method(cursorAuth, 'runCursorSync', async () => {});
+  const result = await collectUsageOnce({ ...f.options, clients: 'cursor', deviceId: 'test', osInfo: {},
+    wslScanEnabled: false, projectsEnabled: true, includeHistory: true,
+    runTokscale: async () => ({ entries: [] }), runGraph: async () => ({ contributions: [] }),
+    pricingRevision: 'local-model-regression', lookupModelPricing: async model => {
+      assert.equal(model, 'grok-4.6');
+      return { resolution: { exactModelIdentity: true, stripped: false },
+        pricing: { inputCostPerToken: 2e-6, outputCostPerToken: 6e-6, cacheReadInputTokenCost: 5e-7 } };
+    } });
+  for (const period of ['today', 'month', 'allTime']) {
+    assert.equal(result[period].models['grok-4.6'], 277370);
+    assert.equal(result[period].models.unknown, undefined);
+    assert.ok(Math.abs(result[period].costUsd - 0.154724) < 1e-9);
+    assert.equal(result[period].unpricedTokens || 0, 0);
+    assert.equal(result.cursorLocalModelEstimates[period]['grok-4.6'], 277370);
+  }
+  assert.ok(Math.abs(result.history.summary.totalCost - 0.154724) < 1e-9);
+  const session = Object.values(result.nativeSessions.today)[0];
+  const project = Object.values(result.nativeProjects.today)[0];
+  assert.ok(Math.abs(session.cursorEstimatedCostUsd - 0.154724) < 1e-9);
+  assert.ok(Math.abs(project.cursorEstimatedCostUsd - 0.154724) < 1e-9);
+  assert.equal(session.unpricedTokens || 0, 0);
+  const sessionRows = require('../../src/electron/renderer/sessionRows').sessionRowsForPeriod({}, { nativeSessions: result.nativeSessions.today });
+  const projectRows = require('../../src/electron/renderer/projectRows').projectRowsForPeriod({}, { nativeProjects: result.nativeProjects.today });
+  assert.ok(Math.abs(sessionRows[0].cost - 0.154724) < 1e-9);
+  assert.ok(Math.abs(projectRows[0].cost - 0.154724) < 1e-9);
+  const wire = require('../../src/shared/usage').normalizeDeviceRecord(result);
+  assert.equal(wire.cursorLocalModelEstimates, undefined);
+  assert.equal(require('../../src/shared/syncPayload').syncPayload(result).cursorLocalModelEstimates, undefined);
+  assert.equal(wire.periods.today.models['grok-4.6'], 277370);
+});
+
 test('duplicate hook executions in different windows count a generation once', t => {
   const f = fixture(t); f.hooks();
   f.hooks(f.time(26) + 100, {}, f.log.replace('window1', 'window2'));
   assert.equal(readCursorLocalTurnUsage(f.options).rows.length, 1);
   assert.equal(readCursorLocalUsage(f.options).length, 1);
+});
+
+test('version-one counters gain model evidence without changing tokens and retain it after rotation', t => {
+  const f = fixture(t); f.hooks();
+  const [before] = readCursorLocalUsage(f.options);
+  fs.writeFileSync(f.file, JSON.stringify({ version: 1, rows: [before], conflicts: [] }));
+  fs.unlinkSync(f.log);
+  f.hooks(f.time(26), { model_id: 'grok-4.6', model_params: [{ id: 'fast', value: 'false' }] });
+  const [after] = readCursorLocalUsage(f.options);
+  assert.equal(after.model, 'grok-4.6'); assert.equal(after.totalTokens, before.totalTokens);
+  fs.unlinkSync(f.log);
+  assert.deepEqual(readCursorLocalUsage(f.options), [after]);
+  assert.equal(JSON.parse(fs.readFileSync(f.file)).version, 2);
+});
+
+test('conflicting model metadata retains exact counters but permanently removes model pricing', t => {
+  const f = fixture(t);
+  f.hooks(f.time(26), { model_id: 'grok-4.6', model_params: [{ id: 'fast', value: 'false' }] });
+  assert.equal(readCursorLocalUsage(f.options)[0].model, 'grok-4.6');
+  f.hooks(f.time(26) + 100, { model_id: 'grok-4.7', model_params: [{ id: 'fast', value: 'false' }] }, f.log.replace('window1', 'window2'));
+  const [row] = readCursorLocalUsage(f.options);
+  assert.equal(row.model, 'unknown'); assert.equal(row.modelConflict, true); assert.equal(row.totalTokens, 35);
+  fs.rmSync(path.join(f.dir, '.config/Cursor/logs'), { recursive: true });
+  assert.deepEqual(readCursorLocalUsage(f.options), [row]);
 });
 
 test('conflicting counters retire a prior observation durably', t => {

@@ -467,7 +467,7 @@
       // A reported session cost is the same trusted conversation-level value
       // as the cumulative token total. Do not hide it merely because the
       // period cannot be split exactly.
-      cost: tokenDataUnavailable ? 0 : finiteNumber(session?.reportedCostUsd),
+      cost: tokenDataUnavailable ? 0 : finiteNumber(client === 'cursor' ? session?.cursorEstimatedCostUsd : session?.reportedCostUsd),
       ...(session?.unpricedTokens > 0 ? { unpricedTokens: finiteNumber(session.unpricedTokens) } : {}),
       sessionDetailAvailable: session?.sessionDetailAvailable === true,
       color: colors[client] || stable(key, palette),

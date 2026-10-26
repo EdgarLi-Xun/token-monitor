@@ -7,6 +7,7 @@ const { readRegularFileNoFollow, writePrivateJsonAtomic } = require('../../crede
 const { cursorCacheDir } = require('./usageEvents');
 const { normalizeBillingRow } = require('./billingLedger');
 const { readCursorLocalTurnUsage } = require('./localSessions');
+const { explicitModelId, mergeModelEvidence } = require('./localModels');
 
 const MAX_BYTES = 64 * 1024 * 1024;
 const dayKey = time => new Date(time).toISOString().slice(0, 10);
@@ -59,17 +60,21 @@ function localNativeCoverage(options = {}) {
 
 function normalizedRow(value) {
   const row = normalizeBillingRow(value);
-  return row && /^[a-f0-9]{64}$/.test(row.id || '') && row.model === 'unknown' ? row : null;
+  if (!row || !/^[a-f0-9]{64}$/.test(row.id || '')) return null;
+  if (row.model !== 'unknown' && (!explicitModelId(row.model) || typeof value.priceable !== 'boolean')) return null;
+  if (value.modelConflict === true && row.model !== 'unknown') return null;
+  return { ...row, ...(typeof value.priceable === 'boolean' ? { priceable: value.priceable } : {}),
+    ...(value.modelConflict === true ? { modelConflict: true } : {}) };
 }
 
 // The collector is the single writer. Persist only verified scalar counters,
 // so log rotation cannot retract recorded usage or retain conversation content.
 function readCursorLocalUsage(options = {}) {
   const file = options.localUsagePath || path.join(cursorCacheDir(options), '..', 'cursor-local-usage.json');
-  let saved = { version: 1, rows: [], conflicts: [] };
+  let saved = { version: 2, rows: [], conflicts: [] };
   try {
     saved = JSON.parse(readRegularFileNoFollow(file, { maxBytes: MAX_BYTES }));
-    if (saved.version !== 1 || !Array.isArray(saved.rows) || !Array.isArray(saved.conflicts)
+    if (![1, 2].includes(saved.version) || !Array.isArray(saved.rows) || !Array.isArray(saved.conflicts)
       || saved.rows.some(row => !normalizedRow(row))
       || saved.conflicts.some(id => !/^[a-f0-9]{64}$/.test(id))) throw new Error('Invalid Cursor local usage ledger');
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -82,10 +87,11 @@ function readCursorLocalUsage(options = {}) {
     const previous = rows.get(row.id);
     if (previous && ['totalTokens', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens']
       .some(key => previous[key] !== row[key])) conflicts.add(row.id);
-    else if (!previous || row.eventTime < previous.eventTime) rows.set(row.id, row);
+    else rows.set(row.id, { ...row, eventTime: Math.min(previous?.eventTime || row.eventTime, row.eventTime),
+      ...mergeModelEvidence(previous, row) });
   }
   for (const id of conflicts) rows.delete(id);
-  const next = { version: 1, rows: [...rows.values()].sort((a, b) => a.id.localeCompare(b.id)), conflicts: [...conflicts].sort() };
+  const next = { version: 2, rows: [...rows.values()].sort((a, b) => a.id.localeCompare(b.id)), conflicts: [...conflicts].sort() };
   const changed = JSON.stringify(saved) !== JSON.stringify(next);
   if (changed) writePrivateJsonAtomic(file, next, { compact: true, maxBytes: MAX_BYTES });
   if (options.cursorBillingAccounts?.length) return [];

@@ -123,6 +123,7 @@
       if (unpriced > 0) project.unpricedTokens = (project.unpricedTokens || 0) + unpriced;
       // Reasonix native project telemetry is local reference data only. Its
       // reported session cost must never become generic project cost.
+      project.cost += Math.max(0, Number(entry.cursorEstimatedCostUsd) || 0);
       addModelTokens(project.modelTokens, entry.models, tokens);
       for (const [client, value] of Object.entries(entry.clients || {})) {
         const tokens = Math.max(0, Number(value || 0));

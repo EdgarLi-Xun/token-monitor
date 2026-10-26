@@ -1286,12 +1286,14 @@ async function collectUsageOnce(options) {
     }) : [];
   const cursorSupplementRows = [...cursorBillingRows, ...cursorLocalRows];
   let cursorBillingPricing = {};
-  if (cursorBillingRows.length) {
+  if (cursorSupplementRows.length) {
     try {
-      cursorBillingPricing = await resolveLocalUsagePricing(cursorBillingRows, {
-        lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+      const lookup = options.lookupModelPricing || lookupModelPricing;
+      cursorBillingPricing = await resolveLocalUsagePricing(cursorSupplementRows.filter(row => row.priceable !== false), {
+        lookupModelPricing: cursorBillingRows.length ? lookup : (model, timeout) =>
+          require('./providers/cursor/localModels').selectedModelPricing(model, timeout, lookup),
         commandTimeoutMs: options.pricingTimeoutMs,
-        pricingRevision: options.pricingRevision ?? pricingFingerprint(options)
+        pricingRevision: `${cursorBillingRows.length ? '' : 'cursor-local-selection:'}${options.pricingRevision ?? pricingFingerprint(options)}`
       });
     } catch (_) {
       // Catalog failures leave the ledger unpriced rather than blocking usage.
@@ -1374,6 +1376,11 @@ async function collectUsageOnce(options) {
   // The request ledger is this source's archive. A second per-session archive
   // would resurrect its contribution after a native rollout takes precedence.
   if (codexLocalView) summary.codexLocalSessionKeys = codexLocalView.sessionKeys;
+  // Presentation-only provenance; the normal aggregates keep their existing
+  // wire shape and the selected configuration must not look like a server bill.
+  if (trackedClientSet.has('cursor')) summary.cursorLocalModelEstimates = Object.fromEntries(
+    ['today', 'month', 'allTime'].map(name => [name, cursorLocalRows.length
+      ? Object.fromEntries(Object.entries(cursorBillingView[name].models || {}).filter(([model]) => model !== 'unknown')) : {}]));
   if (options.reasonixNativeSessionsEnabled === true && trackedClientSet.has('reasonix')) {
     try {
       const nativeCache = options.reasonixNativeSessionCache || createReasonixNativeSessionCache({
@@ -1398,6 +1405,7 @@ async function collectUsageOnce(options) {
       const cursorView = require('./providers/cursor/localSessions').readCursorLocalSessions({
         homeDir: options.homeDir, env: options.env, platform: platformValue, now: collectedAt,
         allTimeSince, projectsEnabled, projectIdentity, billingRows: cursorBillingRows,
+        localRows: cursorLocalRows, pricingByModel: cursorBillingPricing,
         periods: { today, month, allTime }
       });
       for (const [field, values] of [['nativeSessions', cursorView.sessions], ['nativeProjects', cursorView.projects]]) {

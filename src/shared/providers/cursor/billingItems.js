@@ -110,7 +110,7 @@ function pricedBillingEntry(row, pricingByModel) {
     cacheWrite: row.cacheWriteTokens,
     output: row.outputTokens,
     total: row.totalTokens
-  }, pricingByModel?.[String(row.model || '').toLowerCase()] || null);
+  }, row.priceable === false ? null : pricingByModel?.[String(row.model || '').toLowerCase()] || null);
   return {
     client: 'cursor',
     model: row.model,
@@ -151,7 +151,7 @@ function billingHistoryGraph(rows, pricingByModel) {
     const estimate = estimatedCost({
       input: row.inputTokens, cacheRead: row.cacheReadTokens,
       cacheWrite: row.cacheWriteTokens, output: row.outputTokens, total: row.totalTokens
-    }, pricingByModel?.[String(row.model || '').toLowerCase()] || null);
+    }, row.priceable === false ? null : pricingByModel?.[String(row.model || '').toLowerCase()] || null);
     days.get(date).clients.push({
       client: 'cursor', modelId: row.model, cost: estimate.cost, messages: 1,
       ...(estimate.unpricedTokens > 0 ? { unpricedTokens: estimate.unpricedTokens } : {}),
@@ -189,6 +189,7 @@ function supplementCursorBilling(state, rows, now, pricingByModel) {
 
 module.exports = {
   BILLING_ITEMS_URL,
+  pricedBillingEntry,
   billingHistoryGraph,
   billingRowKey,
   nextPageToken,

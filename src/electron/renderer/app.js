@@ -3161,6 +3161,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
     key: model,
     unpricedTokens,
     name: model === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : model,
+    subtitle: state.stats?.cursorLocalModelEstimates?.[state.period]?.[model] > 0 ? t('usage.localModelEstimate') : '',
     value,
     cost,
     unattributed,
