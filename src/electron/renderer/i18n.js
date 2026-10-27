@@ -17,7 +17,6 @@
 
   const MESSAGES = {
     en: {
-      'settings.cursor.billingNote': "Optional billing recovery fills missing tool, model and history usage. Connect each account with the same email in Grok. Sessions and projects can remain unavailable when the source cannot identify them.",
       'settings.cursor.billingConnect': "Connect billing recovery",
       'settings.cursor.billingReconnect': "Open billing sign-in",
       'settings.cursor.billingDisconnect': "Disconnect billing recovery",
@@ -2058,7 +2057,6 @@
       'sortMostTokens': '↕ Most tokens'
     },
     'zh-TW': {
-      'settings.cursor.billingNote': "選用的帳單補採可補全工具、模型及歷史用量。請為每個帳號使用相同信箱登入 Grok。來源無法確認歸屬時，工作階段及專案用量仍顯示未知。",
       'settings.cursor.billingConnect': "連接帳單補採",
       'settings.cursor.billingReconnect': "開啟帳單登入",
       'settings.cursor.billingDisconnect': "中斷帳單補採",
@@ -4099,7 +4097,6 @@
       'sortMostTokens': '↕ Token 最多'
     },
     'zh-CN': {
-      'settings.cursor.billingNote': "可选的账单补采可补全工具、模型和历史用量。请为每个账号使用相同邮箱登录 Grok。来源无法确认归属时，会话和项目用量仍显示未知。",
       'settings.cursor.billingConnect': "连接账单补采",
       'settings.cursor.billingReconnect': "打开账单登录",
       'settings.cursor.billingDisconnect': "断开账单补采",
@@ -6140,7 +6137,6 @@
       'sortMostTokens': '↕ Token 最多'
     },
     ko: {
-      'settings.cursor.billingNote': "선택적 청구 복구로 도구, 모델 및 기록의 누락된 사용량을 보완합니다. 각 계정과 같은 이메일로 Grok에 로그인하세요. 출처를 확인할 수 없는 세션과 프로젝트 사용량은 알 수 없음으로 표시됩니다.",
       'settings.cursor.billingConnect': "청구 복구 연결",
       'settings.cursor.billingReconnect': "청구 로그인 열기",
       'settings.cursor.billingDisconnect': "청구 복구 연결 해제",
@@ -8181,7 +8177,6 @@
       'views.trends': '추이',
     },
     ja: {
-      'settings.cursor.billingNote': "任意の請求データ復元でツール・モデル・履歴の不足分を補います。各アカウントと同じメールで Grok にログインしてください。帰属を確認できないセッションやプロジェクトの使用量は不明のまま表示されます。",
       'settings.cursor.billingConnect': "請求データ復元に接続",
       'settings.cursor.billingReconnect': "請求ログインを開く",
       'settings.cursor.billingDisconnect': "請求データ復元を切断",
@@ -10222,7 +10217,6 @@
       'views.trends': 'トレンド',
     },
     'pt-BR': {
-      'settings.cursor.billingNote': "A recuperação opcional de cobrança preenche o uso ausente em ferramentas, modelos e histórico. Entre no Grok com o mesmo e-mail de cada conta. O uso de sessões e projetos pode permanecer indisponível quando a origem não identifica sua atribuição.",
       'settings.cursor.billingConnect': "Conectar recuperação de cobrança",
       'settings.cursor.billingReconnect': "Abrir login de cobrança",
       'settings.cursor.billingDisconnect': "Desconectar recuperação de cobrança",

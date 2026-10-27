@@ -76,4 +76,8 @@ test('startup does not open a Grok billing sign-in or poll billing accounts', ()
   const startup = main.slice(main.indexOf('app.whenReady().then('), main.indexOf('  syncLoginItemSettingFromOs();', main.indexOf('app.whenReady().then(')));
   assert.doesNotMatch(startup, /openGrokDashboardWindow\(|startGrokBillingRefresh\(|selectedCursorBillingAccounts\(/);
   assert.doesNotMatch(main, /ipcMain\.handle\('cursor:connectBilling'|ipcMain\.handle\('cursor:disconnectBilling'/);
+  const settingsPage = fs.readFileSync(path.join(root, 'renderer/index.html'), 'utf8');
+  const i18n = fs.readFileSync(path.join(root, 'renderer/i18n.js'), 'utf8');
+  assert.doesNotMatch(settingsPage, /settings\.cursor\.billingNote/);
+  assert.doesNotMatch(i18n, /settings\.cursor\.billingNote/);
 });
