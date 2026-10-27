@@ -32,7 +32,7 @@ test('a full billing ledger preserves readable history and reports its storage l
   assert.equal(JSON.parse(fs.readFileSync(file)).rows.length, 2);
 });
 
-test('closing the main window quits when only a hidden billing window remains', t => {
+test('closing the main window does not special-case a Grok billing window', t => {
   class Window extends EventEmitter {
     constructor() { super(); this.webContents = new EventEmitter(); }
     isDestroyed() { return false; }
@@ -53,8 +53,9 @@ test('closing the main window quits when only a hidden billing window remains', 
     BrowserWindow: { getAllWindows: () => [window] },
     edgeDockController: null, notchController: null, ownsBillingWindow
   });
+  assert.doesNotMatch(handler, /ownsBillingWindow/);
   closed();
-  assert.equal(quit, 1);
+  assert.equal(quit, 0);
   assert.equal(ownsBillingWindow(window), true);
   window.emit('closed');
   assert.equal(ownsBillingWindow(window), false);
