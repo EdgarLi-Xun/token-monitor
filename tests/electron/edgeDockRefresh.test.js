@@ -82,31 +82,11 @@ function fixture() {
   return { context, usage, limits, history, calls };
 }
 
-test('manual refresh waits for current Cursor billing before collecting usage', async () => {
-  const { context, usage, calls } = fixture();
-  const billing = deferred();
-  context.settings.clients = 'cursor,codex';
-  context.refreshCursorBillingAccounts = options => {
-    assert.equal(options.todayOnly, true);
-    calls.push(['billing']);
-    return billing.promise;
-  };
-  const refresh = context.refreshManualStats();
-  assert.deepEqual(calls, [['billing']], 'the collector must not read the old ledger first');
-  billing.resolve(1);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(calls.map(call => call[0]), ['billing', 'limits', 'usage']);
-  usage.resolve(true);
-  await refresh;
-});
-
-test('unavailable Cursor billing does not block manual collection of other tools', async () => {
+test('manual refresh collects Cursor usage without waiting for Grok billing', async () => {
   const { context, usage, calls } = fixture();
   context.settings.clients = 'cursor,codex';
-  context.refreshCursorBillingAccounts = async () => { calls.push(['billing']); throw new Error('Grok billing items HTTP 403'); };
   const refresh = context.refreshManualStats();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(calls.map(call => call[0]), ['billing', 'limits', 'usage']);
+  assert.deepEqual(calls.map(call => call[0]), ['limits', 'usage']);
   usage.resolve(true);
   await refresh;
 });
